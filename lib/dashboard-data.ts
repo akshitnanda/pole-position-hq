@@ -287,7 +287,7 @@ async function fetchSeasonStandings(year: number) {
       findManySeasonDriverStanding(
         where: { year: { equals: ${year} } }
         orderBy: [{ positionDisplayOrder: asc }]
-        take: 12
+        take: 24
       ) {
         positionText
         positionNumber
@@ -438,7 +438,7 @@ function buildTrackCars(
 
   return Array.from(latestByDriver.values())
     .sort((a, b) => a.position - b.position)
-    .slice(0, 10)
+    .slice(0, 20)
     .map((entry) => {
       const driver = byNumber.get(String(entry.driver_number));
 
@@ -551,6 +551,46 @@ function buildTelemetryInsights(samples: TelemetrySample[]): TelemetryInsights |
   };
 }
 
+function buildTrackLayoutKey(circuitName: string | null | undefined) {
+  const normalized = (circuitName ?? "").toLowerCase();
+  const aliases: Array<[string, string]> = [
+    ["bahrain", "bahrain"],
+    ["jeddah", "jeddah"],
+    ["saudi", "jeddah"],
+    ["albert park", "melbourne"],
+    ["melbourne", "melbourne"],
+    ["suzuka", "suzuka"],
+    ["shanghai", "shanghai"],
+    ["miami", "miami"],
+    ["imola", "imola"],
+    ["monaco", "monaco"],
+    ["catalunya", "barcelona"],
+    ["barcelona", "barcelona"],
+    ["gilles villeneuve", "montreal"],
+    ["montreal", "montreal"],
+    ["red bull ring", "red-bull-ring"],
+    ["silverstone", "silverstone"],
+    ["hungaroring", "hungaroring"],
+    ["spa", "spa"],
+    ["zandvoort", "zandvoort"],
+    ["monza", "monza"],
+    ["baku", "baku"],
+    ["marina bay", "singapore"],
+    ["singapore", "singapore"],
+    ["americas", "austin"],
+    ["austin", "austin"],
+    ["mexico", "mexico-city"],
+    ["interlagos", "interlagos"],
+    ["sao paulo", "interlagos"],
+    ["las vegas", "las-vegas"],
+    ["lusail", "lusail"],
+    ["yas marina", "yas-marina"],
+    ["abu dhabi", "yas-marina"],
+  ];
+
+  return aliases.find(([alias]) => normalized.includes(alias))?.[1] ?? "fallback";
+}
+
 async function fetchOpenDrivers(sessionKey: number | "latest") {
   return fetchJson<OpenF1Driver[]>(
     `${OPEN_F1_BASE}/drivers?session_key=${sessionKey}`,
@@ -562,7 +602,7 @@ async function fetchSessions(year: number) {
 }
 
 function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight[] {
-  return openDrivers.slice(0, 10).map((driver, index) => ({
+  return openDrivers.slice(0, 24).map((driver, index) => ({
     id: `fallback-${driver.driver_number}`,
     fullName: driver.full_name,
     firstName: driver.first_name,
@@ -721,6 +761,8 @@ export async function getDashboardData(): Promise<DashboardData> {
   const telemetryInsights = buildTelemetryInsights(telemetrySamples);
   const fantasy = await fetchFantasyBoard(driverInsights);
   const trackCars = buildTrackCars(positions, driverInsights);
+  const mapCircuitName =
+    nextSession?.circuit_short_name ?? telemetrySession?.circuitName ?? "Live Circuit";
 
   return {
     generatedAt,
@@ -734,7 +776,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     telemetryInsights,
     standings: driverInsights,
     trackMap: {
-      circuitName: telemetrySession?.circuitName ?? "Live Circuit",
+      circuitName: mapCircuitName,
+      layoutKey: buildTrackLayoutKey(mapCircuitName),
       cars: trackCars,
     },
     sources: {

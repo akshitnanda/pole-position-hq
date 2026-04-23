@@ -510,6 +510,357 @@ function getFeedTone(status: DashboardData["sources"]["schedule"]["status"]) {
   return { label: "Empty", className: "text-[var(--muted)] bg-black/5 border-black/10" };
 }
 
+type TrackLayoutMarker = {
+  label: string;
+  x: number;
+  y: number;
+};
+
+type TrackLayout = {
+  name: string;
+  path: string;
+  start: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  };
+  sectors: TrackLayoutMarker[];
+  corners: TrackLayoutMarker[];
+  drs: TrackLayoutMarker[];
+};
+
+const FALLBACK_TRACK_LAYOUT: TrackLayout = {
+  name: "Broadcast circuit",
+  path: "M58 186 C76 88 216 66 274 114 S454 184 500 118 S494 38 390 58 S212 236 292 270 S470 274 486 218 S328 138 248 180 S76 280 58 186",
+  start: { x1: 66, y1: 177, x2: 66, y2: 207 },
+  sectors: [
+    { label: "S1", x: 140, y: 60 },
+    { label: "S2", x: 476, y: 150 },
+    { label: "S3", x: 228, y: 286 },
+  ],
+  corners: [
+    { label: "T1", x: 104, y: 116 },
+    { label: "T4", x: 254, y: 86 },
+    { label: "T7", x: 452, y: 96 },
+    { label: "T11", x: 342, y: 254 },
+    { label: "T14", x: 154, y: 224 },
+  ],
+  drs: [
+    { label: "DRS", x: 384, y: 62 },
+    { label: "DRS", x: 392, y: 274 },
+  ],
+};
+
+const TRACK_LAYOUTS: Record<string, TrackLayout> = {
+  bahrain: {
+    name: "Bahrain International",
+    path: "M78 200 C86 116 152 70 230 80 C288 88 300 142 258 166 C214 192 216 244 282 262 C370 286 486 248 498 174 C510 98 438 54 366 84 C320 104 340 154 390 146 C442 138 456 194 398 214 C310 244 176 276 116 246 C88 232 74 218 78 200",
+    start: { x1: 92, y1: 190, x2: 92, y2: 220 },
+    sectors: [
+      { label: "S1", x: 206, y: 62 },
+      { label: "S2", x: 458, y: 132 },
+      { label: "S3", x: 226, y: 278 },
+    ],
+    corners: [
+      { label: "T1", x: 116, y: 120 },
+      { label: "T4", x: 286, y: 152 },
+      { label: "T10", x: 344, y: 214 },
+      { label: "T14", x: 468, y: 204 },
+    ],
+    drs: [
+      { label: "DRS", x: 142, y: 82 },
+      { label: "DRS", x: 430, y: 246 },
+    ],
+  },
+  jeddah: {
+    name: "Jeddah Corniche",
+    path: "M82 270 C132 240 166 206 190 154 C218 92 268 54 332 60 C400 66 454 112 492 182 C510 216 494 246 456 250 C400 256 360 226 318 178 C280 134 240 128 210 174 C182 218 150 262 96 286",
+    start: { x1: 94, y1: 256, x2: 118, y2: 278 },
+    sectors: [
+      { label: "S1", x: 190, y: 126 },
+      { label: "S2", x: 410, y: 88 },
+      { label: "S3", x: 402, y: 258 },
+    ],
+    corners: [
+      { label: "T1", x: 104, y: 248 },
+      { label: "T13", x: 330, y: 58 },
+      { label: "T22", x: 486, y: 198 },
+      { label: "T27", x: 346, y: 214 },
+    ],
+    drs: [
+      { label: "DRS", x: 258, y: 68 },
+      { label: "DRS", x: 446, y: 158 },
+    ],
+  },
+  melbourne: {
+    name: "Albert Park",
+    path: "M76 210 C74 128 154 74 250 78 C344 82 420 58 484 112 C526 148 510 222 442 244 C356 274 266 252 202 282 C144 310 74 278 76 210",
+    start: { x1: 84, y1: 196, x2: 84, y2: 226 },
+    sectors: [
+      { label: "S1", x: 174, y: 72 },
+      { label: "S2", x: 484, y: 142 },
+      { label: "S3", x: 224, y: 292 },
+    ],
+    corners: [
+      { label: "T1", x: 96, y: 164 },
+      { label: "T3", x: 210, y: 78 },
+      { label: "T9", x: 462, y: 94 },
+      { label: "T11", x: 476, y: 230 },
+      { label: "T14", x: 146, y: 276 },
+    ],
+    drs: [
+      { label: "DRS", x: 312, y: 70 },
+      { label: "DRS", x: 360, y: 260 },
+    ],
+  },
+  suzuka: {
+    name: "Suzuka",
+    path: "M70 210 C102 132 182 96 260 112 C334 128 386 76 458 78 C514 80 522 132 476 160 C426 192 350 176 302 214 C250 254 296 292 374 274 C444 258 492 282 484 300 C474 320 382 318 306 294 C202 260 120 278 82 244 C68 232 64 222 70 210 M294 206 C270 170 290 138 330 130",
+    start: { x1: 86, y1: 196, x2: 86, y2: 226 },
+    sectors: [
+      { label: "S1", x: 188, y: 90 },
+      { label: "S2", x: 456, y: 120 },
+      { label: "S3", x: 336, y: 292 },
+    ],
+    corners: [
+      { label: "T1", x: 94, y: 176 },
+      { label: "S", x: 246, y: 112 },
+      { label: "130R", x: 462, y: 276 },
+      { label: "T16", x: 300, y: 294 },
+    ],
+    drs: [{ label: "DRS", x: 400, y: 82 }],
+  },
+  shanghai: {
+    name: "Shanghai",
+    path: "M98 108 C132 52 246 52 276 120 C306 188 228 206 190 166 C154 128 202 86 248 114 C300 146 330 216 398 222 C470 228 512 184 494 128 C478 78 412 66 356 96 C308 122 320 180 374 178 C430 176 448 232 388 262 C300 306 124 280 86 206 C68 172 74 144 98 108",
+    start: { x1: 110, y1: 102, x2: 82, y2: 116 },
+    sectors: [
+      { label: "S1", x: 236, y: 72 },
+      { label: "S2", x: 484, y: 154 },
+      { label: "S3", x: 208, y: 288 },
+    ],
+    corners: [
+      { label: "T1", x: 146, y: 82 },
+      { label: "T6", x: 260, y: 194 },
+      { label: "T11", x: 378, y: 178 },
+      { label: "T14", x: 480, y: 116 },
+    ],
+    drs: [
+      { label: "DRS", x: 412, y: 220 },
+      { label: "DRS", x: 178, y: 276 },
+    ],
+  },
+  miami: {
+    name: "Miami International",
+    path: "M74 208 C78 126 156 80 250 84 C340 88 394 118 438 86 C488 50 532 92 500 146 C474 192 408 188 378 224 C346 260 398 294 470 270 C510 258 520 288 474 304 C386 332 282 294 220 256 C174 228 114 264 84 238 C74 230 72 218 74 208",
+    start: { x1: 88, y1: 198, x2: 88, y2: 228 },
+    sectors: [
+      { label: "S1", x: 196, y: 80 },
+      { label: "S2", x: 486, y: 116 },
+      { label: "S3", x: 330, y: 292 },
+    ],
+    corners: [
+      { label: "T1", x: 102, y: 166 },
+      { label: "T8", x: 412, y: 102 },
+      { label: "T11", x: 388, y: 220 },
+      { label: "T17", x: 476, y: 270 },
+    ],
+    drs: [
+      { label: "DRS", x: 304, y: 88 },
+      { label: "DRS", x: 426, y: 298 },
+    ],
+  },
+  monaco: {
+    name: "Monaco",
+    path: "M96 220 C92 150 136 92 206 92 C252 92 274 126 246 158 C218 188 252 218 314 204 C392 186 480 160 500 212 C518 260 442 288 364 268 C300 252 242 272 184 286 C126 300 96 262 96 220",
+    start: { x1: 106, y1: 208, x2: 106, y2: 238 },
+    sectors: [
+      { label: "S1", x: 176, y: 86 },
+      { label: "S2", x: 390, y: 178 },
+      { label: "S3", x: 236, y: 286 },
+    ],
+    corners: [
+      { label: "T1", x: 112, y: 178 },
+      { label: "CAS", x: 232, y: 112 },
+      { label: "TAB", x: 474, y: 218 },
+      { label: "RSC", x: 172, y: 286 },
+    ],
+    drs: [{ label: "DRS", x: 396, y: 268 }],
+  },
+  montreal: {
+    name: "Gilles Villeneuve",
+    path: "M86 228 C96 146 174 96 266 102 C354 108 444 74 492 132 C536 186 488 260 392 268 C314 274 266 224 194 248 C122 272 78 260 86 228",
+    start: { x1: 98, y1: 218, x2: 98, y2: 248 },
+    sectors: [
+      { label: "S1", x: 174, y: 96 },
+      { label: "S2", x: 468, y: 122 },
+      { label: "S3", x: 302, y: 274 },
+    ],
+    corners: [
+      { label: "T1", x: 110, y: 184 },
+      { label: "T6", x: 286, y: 102 },
+      { label: "T10", x: 498, y: 190 },
+      { label: "T14", x: 384, y: 268 },
+    ],
+    drs: [
+      { label: "DRS", x: 372, y: 94 },
+      { label: "DRS", x: 208, y: 262 },
+    ],
+  },
+  silverstone: {
+    name: "Silverstone",
+    path: "M70 196 C80 112 170 74 262 92 C332 106 380 74 458 84 C520 92 526 154 470 178 C412 204 374 168 322 204 C270 240 302 286 392 284 C454 282 496 300 474 316 C430 348 292 306 214 270 C154 244 62 260 70 196",
+    start: { x1: 84, y1: 184, x2: 84, y2: 214 },
+    sectors: [
+      { label: "S1", x: 208, y: 76 },
+      { label: "S2", x: 450, y: 154 },
+      { label: "S3", x: 294, y: 294 },
+    ],
+    corners: [
+      { label: "T1", x: 94, y: 154 },
+      { label: "COP", x: 454, y: 88 },
+      { label: "MAG", x: 334, y: 202 },
+      { label: "STO", x: 448, y: 284 },
+    ],
+    drs: [
+      { label: "DRS", x: 318, y: 90 },
+      { label: "DRS", x: 374, y: 286 },
+    ],
+  },
+  spa: {
+    name: "Spa-Francorchamps",
+    path: "M82 236 C76 178 112 126 168 112 C222 98 260 54 332 64 C404 74 460 126 478 198 C494 262 432 306 354 280 C296 262 248 284 184 296 C126 306 88 276 82 236",
+    start: { x1: 94, y1: 224, x2: 94, y2: 254 },
+    sectors: [
+      { label: "S1", x: 196, y: 92 },
+      { label: "S2", x: 456, y: 176 },
+      { label: "S3", x: 222, y: 300 },
+    ],
+    corners: [
+      { label: "T1", x: 100, y: 194 },
+      { label: "ER", x: 190, y: 108 },
+      { label: "BL", x: 474, y: 210 },
+      { label: "BS", x: 170, y: 296 },
+    ],
+    drs: [
+      { label: "DRS", x: 282, y: 66 },
+      { label: "DRS", x: 380, y: 286 },
+    ],
+  },
+  monza: {
+    name: "Monza",
+    path: "M92 236 C86 166 128 100 204 92 C282 84 334 132 396 100 C454 70 514 110 504 174 C494 240 420 282 332 272 C242 262 106 304 92 236",
+    start: { x1: 104, y1: 224, x2: 104, y2: 254 },
+    sectors: [
+      { label: "S1", x: 196, y: 82 },
+      { label: "S2", x: 484, y: 154 },
+      { label: "S3", x: 280, y: 286 },
+    ],
+    corners: [
+      { label: "T1", x: 118, y: 172 },
+      { label: "LES", x: 314, y: 116 },
+      { label: "ASC", x: 486, y: 200 },
+      { label: "PAR", x: 346, y: 272 },
+    ],
+    drs: [
+      { label: "DRS", x: 286, y: 94 },
+      { label: "DRS", x: 182, y: 290 },
+    ],
+  },
+  singapore: {
+    name: "Marina Bay",
+    path: "M86 232 L86 116 C86 82 114 62 146 72 L252 106 C284 116 306 96 328 74 L388 112 L352 174 L482 174 L506 226 L438 272 L310 244 L246 292 L148 270 C110 262 86 244 86 232",
+    start: { x1: 94, y1: 212, x2: 94, y2: 242 },
+    sectors: [
+      { label: "S1", x: 150, y: 66 },
+      { label: "S2", x: 446, y: 166 },
+      { label: "S3", x: 252, y: 294 },
+    ],
+    corners: [
+      { label: "T1", x: 86, y: 118 },
+      { label: "T7", x: 328, y: 76 },
+      { label: "T14", x: 498, y: 224 },
+      { label: "T19", x: 246, y: 292 },
+    ],
+    drs: [
+      { label: "DRS", x: 226, y: 98 },
+      { label: "DRS", x: 424, y: 176 },
+    ],
+  },
+  austin: {
+    name: "Circuit of the Americas",
+    path: "M74 220 C82 134 156 82 254 82 C328 82 374 114 430 90 C490 64 528 112 500 168 C472 224 388 206 346 246 C306 284 206 294 136 264 C92 246 72 232 74 220",
+    start: { x1: 88, y1: 208, x2: 88, y2: 238 },
+    sectors: [
+      { label: "S1", x: 196, y: 74 },
+      { label: "S2", x: 482, y: 130 },
+      { label: "S3", x: 260, y: 288 },
+    ],
+    corners: [
+      { label: "T1", x: 104, y: 154 },
+      { label: "ESS", x: 300, y: 92 },
+      { label: "T12", x: 484, y: 170 },
+      { label: "T19", x: 156, y: 266 },
+    ],
+    drs: [
+      { label: "DRS", x: 350, y: 88 },
+      { label: "DRS", x: 392, y: 226 },
+    ],
+  },
+  "las-vegas": {
+    name: "Las Vegas Strip",
+    path: "M70 226 L112 86 L468 86 C510 86 528 118 500 150 L388 278 L132 278 C84 278 58 256 70 226",
+    start: { x1: 82, y1: 214, x2: 102, y2: 236 },
+    sectors: [
+      { label: "S1", x: 146, y: 82 },
+      { label: "S2", x: 486, y: 112 },
+      { label: "S3", x: 282, y: 286 },
+    ],
+    corners: [
+      { label: "T1", x: 84, y: 210 },
+      { label: "T5", x: 116, y: 86 },
+      { label: "T12", x: 500, y: 148 },
+      { label: "T17", x: 134, y: 278 },
+    ],
+    drs: [
+      { label: "DRS", x: 302, y: 82 },
+      { label: "DRS", x: 400, y: 280 },
+    ],
+  },
+  "yas-marina": {
+    name: "Yas Marina",
+    path: "M86 214 C90 138 158 88 242 96 C324 104 388 80 462 108 C512 128 522 190 474 220 C426 250 366 222 330 254 C288 290 198 288 132 258 C100 244 84 230 86 214",
+    start: { x1: 98, y1: 202, x2: 98, y2: 232 },
+    sectors: [
+      { label: "S1", x: 190, y: 92 },
+      { label: "S2", x: 470, y: 136 },
+      { label: "S3", x: 260, y: 290 },
+    ],
+    corners: [
+      { label: "T1", x: 104, y: 174 },
+      { label: "T5", x: 298, y: 102 },
+      { label: "T9", x: 482, y: 212 },
+      { label: "T16", x: 188, y: 272 },
+    ],
+    drs: [
+      { label: "DRS", x: 376, y: 96 },
+      { label: "DRS", x: 404, y: 236 },
+    ],
+  },
+};
+
+function getTrackLayout(layoutKey: string | undefined, circuitName: string): TrackLayout {
+  const key = layoutKey && TRACK_LAYOUTS[layoutKey] ? layoutKey : "fallback";
+  const layout = TRACK_LAYOUTS[key] ?? FALLBACK_TRACK_LAYOUT;
+
+  if (layout === FALLBACK_TRACK_LAYOUT && circuitName !== "Live Circuit") {
+    return { ...layout, name: circuitName };
+  }
+
+  return layout;
+}
+
 function HeaderHero({
   dashboard,
   selectedDriver,
@@ -524,185 +875,154 @@ function HeaderHero({
   const countdown = useCountdown(dashboard.nextSession?.dateStart ?? null, snapshotNow);
   const sessionStack = dashboard.nextSessions.slice(0, 3);
   const scheduleTone = getFeedTone(dashboard.sources.schedule.status);
+  const countdownParts = countdown
+    ? [
+        ["D", countdown.days],
+        ["H", countdown.hours],
+        ["M", countdown.minutes],
+        ["S", countdown.seconds],
+      ]
+    : [];
+  const nextEvent = dashboard.nextSession
+    ? `${dashboard.nextSession.circuitName} ${dashboard.nextSession.sessionName}`
+    : "Awaiting next session";
 
   return (
     <Panel
-      className="signal-sheen relative overflow-hidden"
+      className="signal-sheen relative overflow-hidden p-3 sm:p-4"
       tint="var(--team-accent-soft)"
     >
-      <div className="race-stripe pointer-events-none absolute inset-x-4 top-0 h-1.5 rounded-b-full sm:inset-x-5" />
-      <div className="pointer-events-none absolute right-4 top-4 hidden h-28 w-28 rounded-full bg-[radial-gradient(circle,var(--team-accent-soft),transparent_70%)] sm:block" />
-      <div className="grid gap-4 sm:gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="grid gap-3 sm:gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.2em] text-[var(--foreground)]">
-              <Sparkles size={14} />
-              F1 Command Center
+      <div className="race-stripe pointer-events-none absolute inset-x-3 top-0 h-1 rounded-b-full sm:inset-x-4" />
+      <div className="pointer-events-none absolute -right-8 -top-12 h-32 w-32 rounded-full bg-[radial-gradient(circle,var(--team-accent-soft),transparent_68%)] opacity-70" />
+
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.62fr)] lg:items-stretch">
+        <div className="minimal-card team-tint relative overflow-hidden rounded-[20px] px-4 py-3.5 sm:rounded-[24px] sm:px-5 sm:py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full bg-[#e10600] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white shadow-[0_10px_22px_rgba(225,6,0,0.2)]">
+              <Sparkles size={13} />
+              Race control
             </span>
-            <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
-              <span className="h-2 w-2 rounded-full bg-[var(--team-accent)] pulse-dot" />
-              refreshed {freshness}
-            </span>
-            <FunBadge label="Pit wall mode" tone="accent" />
             <span
               className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] ${scheduleTone.className}`}
             >
-              {scheduleTone.label} schedule
+              {scheduleTone.label}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-white/72 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--team-accent)] pulse-dot" />
+              {freshness}
             </span>
           </div>
 
-          <div className="max-w-4xl">
-            <div className="eyebrow">Next session</div>
-            <div className="section-title mt-2 max-w-3xl text-[1.95rem] leading-[0.94] font-semibold sm:text-[3.65rem]">
-              {dashboard.nextSession
-                ? `${dashboard.nextSession.circuitName} ${dashboard.nextSession.sessionName}`
-                : "Awaiting the next active session"}
-            </div>
-            <div className="section-copy mt-3 max-w-2xl text-[13px] sm:text-sm">
-              {dashboard.nextSession
-                ? `${dashboard.nextSession.location}, ${dashboard.nextSession.countryName}. The live tier stays docked while the performance tier lets you correlate lap pace, throttle, brake, and track position in one pass.`
-                : "The dashboard refreshes in the background and will surface the next published session automatically."}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
-              <span className="glass-pill rounded-full px-2.5 py-1">
-                {dashboard.sources.schedule.source}
-              </span>
-              <span className="glass-pill rounded-full px-2.5 py-1">
-                {dashboard.sources.telemetry.source}
-              </span>
-              <span className="glass-pill rounded-full px-2.5 py-1">
-                {dashboard.sources.fantasy.source}
-              </span>
-            </div>
-          </div>
-
-          <div className="grid gap-2.5 sm:grid-cols-2">
-            <div className="minimal-card team-tint rounded-[18px] px-4 py-3.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="eyebrow">Driver focus</div>
-                <FunBadge label="Hot lap" tone="dark" />
-              </div>
-              <div className="section-title mt-2 text-[1.1rem] font-semibold sm:text-2xl">
-                {selectedDriver ? selectedDriver.fullName : "No driver selected"}
-              </div>
-              <div className="section-copy mt-1 text-[13px] sm:text-sm">
-                {selectedDriver
-                  ? `${selectedDriver.teamName} | ${selectedDriver.points} championship points`
-                  : "Select a driver in the timing tower"}
-              </div>
-            </div>
-
-            <div className="minimal-card rounded-[18px] px-4 py-3.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="eyebrow">Weekend stack</div>
-                <FunBadge label={`${sessionStack.length || 0} sessions`} />
-              </div>
-              <div className="mt-2 grid gap-2.5">
-                {sessionStack.length ? (
-                  sessionStack.map((session) => (
-                    <div
-                      key={session.sessionKey}
-                      className="flex items-center justify-between gap-3 text-[13px] sm:text-sm"
-                    >
-                      <span className="font-medium text-[var(--foreground)]">
-                        {session.sessionName}
-                      </span>
-                      <span className="text-[12px] text-[var(--muted)]">
-                        {formatSessionDate(session.dateStart, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                  ))
+          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div className="min-w-0">
+              <div className="eyebrow">Next session</div>
+              <h1 className="section-title mt-1 truncate text-[1.65rem] font-semibold sm:text-[2.35rem] lg:text-[2.65rem]">
+                {nextEvent}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-[var(--muted)] sm:text-[13px]">
+                {dashboard.nextSession ? (
+                  <>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Flag size={13} />
+                      {dashboard.nextSession.location}, {dashboard.nextSession.countryName}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Clock3 size={13} />
+                      {formatSessionDate(dashboard.nextSession.dateStart)}
+                    </span>
+                  </>
                 ) : (
-                  <div className="section-copy text-[13px] sm:text-sm">
-                    Upcoming session blocks will appear here.
-                  </div>
+                  <span>Schedule feed is standing by for the next published weekend.</span>
                 )}
               </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
-            {countdown ? (
-              [
-                ["Days", countdown.days],
-                ["Hours", countdown.hours],
-                ["Minutes", countdown.minutes],
-                ["Seconds", countdown.seconds],
-              ].map(([label, value]) => (
+            <div className="grid grid-cols-4 gap-1.5 sm:min-w-[280px]">
+              {countdownParts.length ? (
+                countdownParts.map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-[15px] border border-black/8 bg-white/78 px-2.5 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                  >
+                    <div className="telemetry-text text-xl font-semibold leading-none text-[var(--foreground)] sm:text-2xl">
+                      {String(value).padStart(2, "0")}
+                    </div>
+                    <div className="mt-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                      {label}
+                    </div>
+                  </div>
+                ))
+              ) : (
                 <div
-                  key={label}
-                  className="minimal-card rounded-[18px] px-3.5 py-3.5 sm:rounded-[20px] sm:px-4 sm:py-4"
+                  className="col-span-4 rounded-[15px] border border-black/8 bg-white/72 px-3 py-3 text-xs text-[var(--muted)]"
                 >
-                  <div className="telemetry-text text-[1.65rem] leading-none font-semibold tracking-[-0.05em] text-[var(--foreground)] sm:text-3xl">
-                    {String(value).padStart(2, "0")}
-                  </div>
-                  <div className="mt-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-[11px] sm:tracking-[0.18em]">
-                    {label}
-                  </div>
+                  Countdown appears when timing is available.
                 </div>
-              ))
-            ) : (
-              <div className="minimal-card rounded-[20px] px-4 py-4 text-sm text-[var(--muted)] sm:col-span-4">
-                Countdown appears when the next session timing is available.
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="grid gap-3">
-          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="eyebrow">Time sync</div>
-                <div className="section-title mt-2 text-base font-semibold sm:text-xl">
-                  {dashboard.nextSession ? "Local and circuit time" : "Schedule pending"}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <div className="minimal-card rounded-[20px] p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="eyebrow">Selected driver</div>
+                <div className="section-title mt-1 truncate text-lg font-semibold">
+                  {selectedDriver?.fullName ?? "Pick from timing"}
+                </div>
+                <div className="truncate text-xs text-[var(--muted)]">
+                  {selectedDriver
+                    ? `${selectedDriver.teamName} | ${selectedDriver.points} pts`
+                    : "Driver rail controls the accent and telemetry focus."}
                 </div>
               </div>
-              <Clock3 size={16} className="text-[var(--muted)]" />
+              <div
+                className="telemetry-text rounded-[14px] px-3 py-2 text-sm font-semibold"
+                style={{
+                  background: selectedDriver
+                    ? rgba(selectedDriver.teamColor, 0.13)
+                    : "rgba(17,21,29,0.06)",
+                  color: selectedDriver ? `#${selectedDriver.teamColor}` : "var(--foreground)",
+                }}
+              >
+                {selectedDriver?.abbreviation ?? "--"}
+              </div>
             </div>
-            {dashboard.nextSession ? (
-              <div className="mt-4 grid gap-3">
-                <StatChip
-                  label="Your time"
-                  value={formatSessionDate(dashboard.nextSession.dateStart)}
-                />
-                <StatChip
-                  label={`Track UTC${dashboard.nextSession.gmtOffset.startsWith("-") ? "" : "+"}${dashboard.nextSession.gmtOffset.slice(0, 5)}`}
-                  value={formatTrackDate(
-                    dashboard.nextSession.dateStart,
-                    dashboard.nextSession.gmtOffset,
-                  )}
-                  accent={selectedDriver?.teamColor}
-                />
-              </div>
-            ) : (
-              <div className="mt-4 text-sm text-[var(--muted)]">
-                Circuit conversion will appear here.
-              </div>
-            )}
           </div>
 
-          <div className="grid gap-2.5 sm:grid-cols-3 sm:gap-3 xl:grid-cols-1">
-            <MiniStat
-              icon={<Flag size={14} />}
-              label="Leader"
-              value={dashboard.standings[0]?.abbreviation ?? "--"}
-            />
-            <MiniStat
-              icon={<Users size={14} />}
-              label="Selected"
-              value={selectedDriver?.abbreviation ?? "--"}
-            />
-            <MiniStat
-              icon={<RefreshCw size={14} />}
-              label="Live"
-              value="30s"
-            />
+          <div className="minimal-card rounded-[20px] p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="eyebrow">Weekend stack</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  Local / track sync stays compact.
+                </div>
+              </div>
+              <FunBadge label="30s refresh" tone="dark" />
+            </div>
+
+            <div className="mt-3 grid gap-2">
+              {sessionStack.length ? (
+                sessionStack.map((session) => (
+                  <div
+                    key={session.sessionKey}
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-2"
+                  >
+                    <span className="truncate text-[13px] font-semibold text-[var(--foreground)]">
+                      {session.sessionName}
+                    </span>
+                    <span className="telemetry-text text-[11px] text-[var(--muted)]">
+                      {formatTrackDate(session.dateStart, session.gmtOffset)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-2 text-xs text-[var(--muted)]">
+                  Upcoming sessions will appear here.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1094,6 +1414,7 @@ function TelemetryExperiencePanel({
 
 function LiveActionDock({
   circuitName,
+  layoutKey,
   cars,
   selectedDriver,
   insights,
@@ -1104,6 +1425,7 @@ function LiveActionDock({
   onSelect,
 }: {
   circuitName: string;
+  layoutKey: string;
   cars: DashboardData["trackMap"]["cars"];
   selectedDriver: DriverInsight | null;
   insights: DashboardData["telemetryInsights"];
@@ -1115,21 +1437,10 @@ function LiveActionDock({
 }) {
   const pathRef = useRef<SVGPathElement | null>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const layout = getTrackLayout(layoutKey, circuitName);
   const activeSample =
     telemetrySamples[clampIndex(scrubIndex, Math.max(1, telemetrySamples.length) - 1)] ?? null;
   const phaseTone = activeSample ? getPhaseTone(activeSample.phase) : null;
-  const cornerMarkers = [
-    { label: "T1", x: 104, y: 116 },
-    { label: "T4", x: 254, y: 86 },
-    { label: "T7", x: 452, y: 96 },
-    { label: "T11", x: 342, y: 254 },
-    { label: "T14", x: 154, y: 224 },
-  ];
-  const sectorMarkers = [
-    { label: "S1", x: 140, y: 60 },
-    { label: "S2", x: 476, y: 150 },
-    { label: "S3", x: 228, y: 286 },
-  ];
   const scrubProgress =
     telemetrySamples.length > 1
       ? clampIndex(scrubIndex, telemetrySamples.length) / (telemetrySamples.length - 1)
@@ -1146,7 +1457,7 @@ function LiveActionDock({
     const length = path.getTotalLength();
     const point = path.getPointAtLength(length * (0.08 + scrubProgress * 0.84));
     setScrubPoint({ x: point.x, y: point.y });
-  }, [scrubProgress]);
+  }, [layout.path, scrubProgress]);
 
   useEffect(() => {
     const path = pathRef.current;
@@ -1164,40 +1475,52 @@ function LiveActionDock({
     });
 
     setPositions(nextPositions);
-  }, [cars]);
+  }, [cars, layout.path]);
 
   return (
     <aside className="xl:sticky xl:top-6 xl:self-start">
       <Panel
-        className="overflow-hidden"
+        className="overflow-hidden p-3 sm:p-4"
         tint={selectedDriver ? rgba(selectedDriver.teamColor, 0.08) : undefined}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="eyebrow">Live action</div>
-              <FunBadge label="Pinned tier" tone="accent" />
+              <span className="inline-flex items-center rounded-full bg-[#e10600] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white">
+                Pinned
+              </span>
             </div>
-            <div className="section-title mt-2 text-lg font-semibold sm:text-xl">
-              Track map + timing tower
+            <div className="section-title mt-1 text-lg font-semibold sm:text-xl">
+              Circuit view + timing tower
             </div>
           </div>
           <MapIcon size={16} className="text-[var(--muted)]" />
         </div>
 
-        <div className="minimal-card signal-sheen mt-4 rounded-[22px] p-4">
-          <div className="mb-3 flex items-center justify-between">
+        <div className="broadcast-map signal-sheen mt-3 rounded-[22px] p-3.5 sm:p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-[var(--foreground)]">{circuitName}</div>
-              <div className="text-[12px] text-[var(--muted)]">track synced with telemetry scrub</div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-[#e10600] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+                  Track map
+                </span>
+                <span className="text-[10px] uppercase tracking-[0.16em] text-white/48">
+                  current event
+                </span>
+              </div>
+              <div className="mt-2 text-base font-semibold text-white">{circuitName}</div>
+              <div className="text-[12px] text-white/55">
+                {layout.name} layout, scrub synced to telemetry
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               {phaseTone ? (
                 <span
                   className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em]"
                   style={{
-                    borderColor: phaseTone.wash,
-                    background: phaseTone.wash,
+                    borderColor: phaseTone.color,
+                    background: "rgba(255,255,255,0.08)",
                     color: phaseTone.color,
                   }}
                 >
@@ -1208,94 +1531,146 @@ function LiveActionDock({
                   {phaseTone.label}
                 </span>
               ) : null}
-              <FunBadge label="Sync on" tone="dark" />
+              <span className="rounded-full border border-white/12 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
+                Sync on
+              </span>
             </div>
           </div>
           <div className="mb-3 grid grid-cols-3 gap-2">
-            <div className="glass-pill rounded-[14px] px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+            <div className="rounded-[14px] border border-white/10 bg-white/[0.07] px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-white/46">
                 Peak
               </div>
-              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+              <div className="telemetry-text mt-1 text-sm font-semibold text-white">
                 {insights ? `${insights.peakSpeed}` : "--"}
               </div>
             </div>
-            <div className="glass-pill rounded-[14px] px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+            <div className="rounded-[14px] border border-white/10 bg-white/[0.07] px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-white/46">
                 Top gear
               </div>
-              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+              <div className="telemetry-text mt-1 text-sm font-semibold text-white">
                 {insights ? `${insights.topGearPct.toFixed(0)}%` : "--"}
               </div>
             </div>
-            <div className="glass-pill rounded-[14px] px-3 py-2">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+            <div className="rounded-[14px] border border-white/10 bg-white/[0.07] px-3 py-2">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-white/46">
                 Gear shifts
               </div>
-              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+              <div className="telemetry-text mt-1 text-sm font-semibold text-white">
                 {insights ? `${insights.gearChanges}` : "--"}
               </div>
             </div>
           </div>
-          <svg viewBox="0 0 560 320" className="h-[196px] w-full sm:h-[220px]">
+          <svg
+            viewBox="0 0 560 320"
+            className="h-[206px] w-full sm:h-[238px]"
+            role="img"
+            aria-label={`${circuitName} broadcast-style circuit map`}
+          >
             <defs>
               <linearGradient id="trackStroke" x1="0" x2="1" y1="0" y2="1">
-                <stop offset="0%" stopColor="rgba(20,24,31,0.74)" />
-                <stop offset="100%" stopColor="rgba(20,24,31,0.18)" />
+                <stop offset="0%" stopColor="rgba(255,255,255,0.98)" />
+                <stop offset="50%" stopColor="rgba(255,255,255,0.78)" />
+                <stop offset="100%" stopColor="rgba(225,6,0,0.86)" />
               </linearGradient>
+              <filter id="trackGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feColorMatrix
+                  in="blur"
+                  type="matrix"
+                  values="1 0 0 0 0.9 0 0.2 0 0 0.05 0 0 0.2 0 0.04 0 0 0 0.45 0"
+                />
+                <feMerge>
+                  <feMergeNode />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
             </defs>
+            <rect x="18" y="18" width="524" height="284" rx="24" fill="rgba(255,255,255,0.035)" />
+            <path
+              d="M42 260 L130 68 L512 68"
+              fill="none"
+              stroke="rgba(225,6,0,0.18)"
+              strokeWidth="1.5"
+              strokeDasharray="7 9"
+            />
+            <path
+              d="M54 282 L512 282"
+              fill="none"
+              stroke="rgba(255,255,255,0.08)"
+              strokeWidth="1"
+              strokeDasharray="4 8"
+            />
             <path
               ref={pathRef}
-              d="M56 182 C 76 86, 216 66, 270 112 S 454 184, 500 118 S 494 36, 390 58 S 212 236, 290 270 S 470 274, 484 218 S 328 138, 248 180 S 76 280, 56 182"
+              d={layout.path}
               fill="none"
-              stroke="rgba(20,24,31,0.08)"
-              strokeWidth="24"
+              stroke="rgba(255,255,255,0.09)"
+              strokeWidth="25"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
             <path
-              d="M56 182 C 76 86, 216 66, 270 112 S 454 184, 500 118 S 494 36, 390 58 S 212 236, 290 270 S 470 274, 484 218 S 328 138, 248 180 S 76 280, 56 182"
+              d={layout.path}
               fill="none"
               stroke="url(#trackStroke)"
               strokeWidth="8"
               strokeLinecap="round"
               strokeLinejoin="round"
+              filter="url(#trackGlow)"
             />
             <line
-              x1="66"
-              y1="177"
-              x2="66"
-              y2="206"
-              stroke="rgba(17,21,29,0.92)"
+              x1={layout.start.x1}
+              y1={layout.start.y1}
+              x2={layout.start.x2}
+              y2={layout.start.y2}
+              stroke="#e10600"
               strokeWidth="4"
               strokeLinecap="round"
             />
             <line
-              x1="74"
-              y1="177"
-              x2="74"
-              y2="206"
+              x1={layout.start.x1 + 8}
+              y1={layout.start.y1}
+              x2={layout.start.x2 + 8}
+              y2={layout.start.y2}
               stroke="#ffffff"
               strokeWidth="4"
               strokeLinecap="round"
             />
-            {sectorMarkers.map((sector) => (
-              <g key={sector.label} transform={`translate(${sector.x}, ${sector.y})`}>
-                <circle r="12" fill="rgba(255,255,255,0.92)" stroke="rgba(17,21,29,0.08)" />
+            {layout.drs.map((zone) => (
+              <g key={`${zone.label}-${zone.x}-${zone.y}`} transform={`translate(${zone.x}, ${zone.y})`}>
+                <rect x="-18" y="-8" width="36" height="16" rx="6" fill="rgba(225,6,0,0.94)" />
                 <text
                   textAnchor="middle"
                   y="4"
                   className="telemetry-text"
-                  fill="rgba(17,21,29,0.86)"
+                  fill="white"
+                  fontSize="8"
+                  fontWeight="700"
+                >
+                  {zone.label}
+                </text>
+              </g>
+            ))}
+            {layout.sectors.map((sector) => (
+              <g key={sector.label} transform={`translate(${sector.x}, ${sector.y})`}>
+                <circle r="13" fill="rgba(255,255,255,0.94)" stroke="rgba(225,6,0,0.45)" />
+                <text
+                  textAnchor="middle"
+                  y="4"
+                  className="telemetry-text"
+                  fill="rgba(17,21,29,0.92)"
                   fontSize="10"
+                  fontWeight="700"
                 >
                   {sector.label}
                 </text>
               </g>
             ))}
-            {cornerMarkers.map((corner) => (
+            {layout.corners.map((corner) => (
               <g key={corner.label} transform={`translate(${corner.x}, ${corner.y})`}>
-                <circle r="9" fill="rgba(17,21,29,0.82)" />
+                <circle r="9" fill="rgba(3,7,18,0.92)" stroke="rgba(255,255,255,0.22)" />
                 <text
                   textAnchor="middle"
                   y="3"
@@ -1316,13 +1691,14 @@ function LiveActionDock({
               return (
                 <g key={car.driverId} transform={`translate(${point.x}, ${point.y})`}>
                   <circle r="12" fill={rgba(car.teamColor, 0.16)} />
-                  <circle r="7" fill={`#${car.teamColor}`} />
+                  <circle r="7" fill={`#${car.teamColor}`} stroke="white" strokeWidth="1.5" />
                   <text
                     y="-17"
                     textAnchor="middle"
                     className="telemetry-text"
-                    fill="rgba(20,24,31,0.84)"
+                    fill="rgba(255,255,255,0.84)"
                     fontSize="10"
+                    fontWeight="700"
                   >
                     {car.abbreviation}
                   </text>
@@ -1347,18 +1723,25 @@ function LiveActionDock({
                   y="-22"
                   textAnchor="middle"
                   className="telemetry-text"
-                  fill={`#${selectedDriver.teamColor}`}
+                  fill="white"
                   fontSize="11"
+                  fontWeight="700"
                 >
                   {selectedDriver.abbreviation}
                 </text>
               </g>
             ) : null}
           </svg>
-          <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
-            <span className="glass-pill rounded-full px-2.5 py-1">start / finish</span>
-            <span className="glass-pill rounded-full px-2.5 py-1">sector split calls</span>
-            <span className="glass-pill rounded-full px-2.5 py-1">corner tags</span>
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.14em] text-white/56">
+            <span className="rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1">
+              start / finish
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1">
+              sector split calls
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/[0.07] px-2.5 py-1">
+              drs windows
+            </span>
           </div>
         </div>
 
@@ -1390,30 +1773,30 @@ function LiveActionDock({
                 className="text-left"
               >
                 <div
-                  className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] border px-3 py-3 transition-all duration-200 hover:-translate-y-0.5"
+                  className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[15px] border px-2.5 py-2 transition-all duration-200 hover:-translate-y-0.5"
                   style={{
                     borderColor: active
-                      ? rgba(driver.teamColor, 0.3)
+                      ? rgba(driver.teamColor, 0.38)
                       : "rgba(20,24,31,0.08)",
                     background: active
-                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.14)}, rgba(255,255,255,0.76))`
-                      : "rgba(255,255,255,0.66)",
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.18)}, rgba(255,255,255,0.84))`
+                      : "rgba(255,255,255,0.7)",
                     boxShadow: active
-                      ? `0 14px 26px ${rgba(driver.teamColor, 0.12)}`
-                      : "0 8px 18px rgba(17,21,29,0.04)",
+                      ? `0 12px 22px ${rgba(driver.teamColor, 0.12)}`
+                      : "0 8px 16px rgba(17,21,29,0.035)",
                   }}
                 >
                   <span
-                    className="h-10 w-1.5 rounded-full"
+                    className="h-8 w-1.5 rounded-full"
                     style={{
                       background: active
                         ? `linear-gradient(180deg, #${driver.teamColor}, ${rgba(driver.teamColor, 0.2)})`
                         : "rgba(17,21,29,0.08)",
                     }}
                   />
-                  <div className="flex w-9 flex-col items-center justify-center">
+                  <div className="flex w-8 flex-col items-center justify-center">
                     <div
-                      className={`telemetry-text text-sm font-semibold ${
+                      className={`telemetry-text text-[13px] font-semibold ${
                         podiumTone === "1"
                           ? "text-[#c78b12]"
                           : podiumTone === "2"
@@ -1426,37 +1809,28 @@ function LiveActionDock({
                       P{driver.standingPosition}
                     </div>
                     {podiumTone ? (
-                      <span className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                        podium
+                      <span className="mt-0.5 text-[8px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                        top
                       </span>
                     ) : null}
                   </div>
-                  <div className="relative h-10 w-10 overflow-hidden rounded-[13px] border border-black/8 bg-white sm:h-11 sm:w-11 sm:rounded-[14px]">
-                    <Image
-                      src={driver.headshotUrl}
-                      alt={driver.fullName}
-                      fill
-                      className="object-cover"
-                      sizes="44px"
-                    />
-                  </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-semibold text-[var(--foreground)] sm:text-sm">
+                    <div className="truncate text-[13px] font-semibold leading-tight text-[var(--foreground)] sm:text-sm">
                       {driver.fullName}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-xs text-[var(--muted)]">
+                    <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-[11px] text-[var(--muted)]">
                         {driver.teamName}
                       </span>
                       <span className="h-1 w-1 rounded-full bg-[var(--muted)]/40" />
-                      <span className="text-[11px] text-[var(--muted)]">
+                      <span className="shrink-0 text-[11px] text-[var(--muted)]">
                         {driver.points} pts
                       </span>
                     </div>
                   </div>
                   <div className="text-right">
                     <div
-                      className="rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em]"
+                      className="telemetry-text rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em]"
                       style={{
                         background: rgba(driver.teamColor, 0.12),
                         color: `#${driver.teamColor}`,
@@ -1464,7 +1838,7 @@ function LiveActionDock({
                     >
                       {driver.abbreviation}
                     </div>
-                    <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                    <div className="mt-1 text-[9px] uppercase tracking-[0.12em] text-[var(--muted)]">
                       {driver.sentiment.label}
                     </div>
                   </div>
@@ -1827,6 +2201,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
         <LiveActionDock
           circuitName={data.trackMap.circuitName}
+          layoutKey={data.trackMap.layoutKey}
           cars={data.trackMap.cars}
           selectedDriver={selectedDriver}
           insights={data.telemetryInsights}

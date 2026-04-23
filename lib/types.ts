@@ -113,6 +113,7 @@ export type DashboardData = {
   standings: DriverInsight[];
   trackMap: {
     circuitName: string;
+    layoutKey: string;
     cars: TrackCar[];
   };
   sources: {

@@ -150,6 +150,30 @@ a {
     inset 0 1px 0 rgba(255, 255, 255, 0.36);
 }
 
+.broadcast-map {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 76% 10%, var(--team-tint, rgba(225, 6, 0, 0.16)), transparent 30%),
+    linear-gradient(145deg, rgba(19, 23, 31, 0.98), rgba(5, 7, 12, 0.96) 62%, rgba(12, 16, 23, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 22px 42px rgba(5, 7, 12, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.broadcast-map::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(180deg, black, transparent 92%);
+  pointer-events: none;
+}
+
 .eyebrow {
   font-size: 10px;
   font-weight: 600;
