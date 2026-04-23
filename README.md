@@ -2,13 +2,15 @@
 
 Pole Position HQ is a premium Formula 1 command center built with Next.js App Router, Tailwind CSS, and TanStack Query. It combines real race schedule data, standings, fantasy signals, and scrub-linked telemetry into a polished public demo surface that feels closer to a pit wall broadcast than a typical stats page.
 
+Live demo: https://polehq.vercel.app
+
 ## What it includes
 
 - Broadcast-inspired F1 dashboard UI with a branded, public-demo shell
 - OpenF1-backed session schedule, standings context, and fastest-lap telemetry
 - F1 GraphQL standings enrichment for driver context and historical stats
 - Official F1 Fantasy API integration with graceful fallback heuristics
-- Scrub-linked telemetry and track map synchronization
+- Scrub-linked telemetry and broadcast-style circuit map synchronization
 - Local-only saved preferences for selected driver and watchlist
 - Public-demo resilience with cached snapshots, fallback states, and source badges
 
@@ -94,7 +96,7 @@ npx vercel --prod
 - Link the project to this repository
 - Set production to deploy from `main`
 - Use Vercel preview deployments for pull requests
-- Configure `NEXT_PUBLIC_SITE_URL` after the first stable production URL is known
+- Set `NEXT_PUBLIC_SITE_URL=https://polehq.vercel.app` when managing env vars in Vercel
 
 ## Data behavior
 
@@ -110,4 +112,4 @@ Pole Position HQ is optimized as a stable live demo, not a fragile ultra-realtim
 
 - No authentication is required in v1
 - Watchlist and selection preferences are stored locally in the browser only
-- The track map is intentionally stylized for the demo and does not yet use circuit-specific geometry
+- The track map uses stylized circuit-specific SVG layouts selected from the dashboard payload
