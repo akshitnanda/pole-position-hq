@@ -40,11 +40,9 @@ body::after {
 
 body::before {
   background:
-    radial-gradient(circle at top left, rgba(225, 6, 0, 0.16), transparent 24%),
-    radial-gradient(circle at 80% 14%, rgba(0, 161, 155, 0.1), transparent 18%),
-    radial-gradient(circle at 76% 74%, rgba(255, 196, 0, 0.08), transparent 18%),
-    radial-gradient(circle at bottom right, rgba(255, 255, 255, 0.54), transparent 28%),
-    linear-gradient(180deg, #f9fafc 0%, #f0f3f7 52%, #eaedf2 100%);
+    linear-gradient(135deg, rgba(225, 6, 0, 0.08), transparent 32%),
+    linear-gradient(225deg, rgba(0, 161, 155, 0.075), transparent 34%),
+    linear-gradient(180deg, #f9fafc 0%, #f1f4f8 50%, #e8ecf2 100%);
 }
 
 body::after {
@@ -85,26 +83,28 @@ a {
 .glass-panel {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.88) 0%,
-    rgba(250, 252, 255, 0.8) 54%,
-    rgba(245, 247, 251, 0.74) 100%
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(250, 252, 255, 0.84) 54%,
+    rgba(245, 247, 251, 0.78) 100%
   );
+  border-radius: 14px;
   border: 1px solid var(--line);
   box-shadow:
-    0 18px 44px rgba(17, 21, 29, 0.07),
+    0 16px 34px rgba(17, 21, 29, 0.065),
     inset 0 1px 0 rgba(255, 255, 255, 0.46);
   backdrop-filter: blur(18px);
 }
 
 .glass-pill {
   background: rgba(255, 255, 255, 0.68);
+  border-radius: 999px;
   border: 1px solid rgba(17, 21, 29, 0.08);
   backdrop-filter: blur(10px);
 }
 
 .telemetry-text {
   font-family: var(--font-mono);
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums lining-nums;
 }
 
@@ -144,6 +144,7 @@ a {
     rgba(255, 255, 255, 0.78) 0%,
     rgba(255, 255, 255, 0.68) 100%
   );
+  border-radius: 8px;
   border: 1px solid rgba(17, 21, 29, 0.08);
   box-shadow:
     0 10px 24px rgba(17, 21, 29, 0.05),
@@ -185,7 +186,7 @@ a {
 
 .section-title {
   font-family: var(--font-display);
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   line-height: 1.02;
   color: var(--foreground);
   text-wrap: balance;
@@ -323,4 +324,36 @@ a {
 
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+button,
+[role="button"],
+[role="slider"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+.telemetry-scrubber {
+  touch-action: none;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-panel,
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }

@@ -22,11 +22,54 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
   type TouchEvent,
 } from "react";
 import { DashboardData, DriverInsight, SessionSummary } from "@/lib/types";
+
+const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
+const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
+type DashboardTab = "overview" | "timing" | "telemetry" | "stats" | "weekend" | "fantasy";
+
+const DASHBOARD_TABS: Array<{
+  id: DashboardTab;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "overview",
+    label: "Overview",
+    description: "Race control",
+  },
+  {
+    id: "timing",
+    label: "Timing",
+    description: "Field order",
+  },
+  {
+    id: "telemetry",
+    label: "Telemetry",
+    description: "Trace lab",
+  },
+  {
+    id: "stats",
+    label: "Stats",
+    description: "Standings",
+  },
+  {
+    id: "weekend",
+    label: "Weekend",
+    description: "Info",
+  },
+  {
+    id: "fantasy",
+    label: "Fantasy",
+    description: "Market",
+  },
+];
 
 function rgba(hex: string, alpha: number) {
   const normalized = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
@@ -161,18 +204,20 @@ function useVisibilityRefresh(refetch: () => Promise<unknown>) {
 }
 
 function useOnlineStatus() {
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
+    const frame = window.requestAnimationFrame(() => {
+      setIsOnline(navigator.onLine);
+    });
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
@@ -508,6 +553,69 @@ function getFeedTone(status: DashboardData["sources"]["schedule"]["status"]) {
   }
 
   return { label: "Empty", className: "text-[var(--muted)] bg-black/5 border-black/10" };
+}
+
+function isDashboardTab(value: unknown): value is DashboardTab {
+  return DASHBOARD_TABS.some((tab) => tab.id === value);
+}
+
+function formatLapTime(value: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "--";
+  }
+
+  const minutes = Math.floor(value / 60);
+  const seconds = value - minutes * 60;
+  return `${minutes}:${seconds.toFixed(3).padStart(6, "0")}`;
+}
+
+function buildConstructorStandings(drivers: DriverInsight[]) {
+  const teams = new Map<
+    string,
+    {
+      teamName: string;
+      teamColor: string;
+      points: number;
+      drivers: string[];
+      podiums: number;
+      wins: number;
+    }
+  >();
+
+  drivers.forEach((driver) => {
+    const current = teams.get(driver.teamName) ?? {
+      teamName: driver.teamName,
+      teamColor: driver.teamColor,
+      points: 0,
+      drivers: [],
+      podiums: 0,
+      wins: 0,
+    };
+
+    current.points += driver.points;
+    current.drivers.push(driver.abbreviation);
+    current.podiums += driver.totalPodiums;
+    current.wins += driver.totalRaceWins;
+    teams.set(driver.teamName, current);
+  });
+
+  return Array.from(teams.values()).sort((a, b) => b.points - a.points);
+}
+
+function getDriverSignal(driver: DriverInsight) {
+  if (driver.standingPosition <= 3) {
+    return "Title pace";
+  }
+
+  if (driver.sentiment.score >= 74) {
+    return "Attack window";
+  }
+
+  if (driver.sentiment.delta < 0) {
+    return "Pressure";
+  }
+
+  return "Stable";
 }
 
 type TrackLayoutMarker = {
@@ -1182,7 +1290,7 @@ function TelemetryExperiencePanel({
   scrubIndex: number;
   onScrub: (index: number | null) => void;
 }) {
-  const activeIndex = clampIndex(scrubIndex, Math.max(1, samples.length) - 1);
+  const activeIndex = clampIndex(scrubIndex, Math.max(1, samples.length));
   const activeSample = samples[activeIndex] ?? null;
   const chartRef = useRef<HTMLDivElement | null>(null);
   const phaseTone = activeSample ? getPhaseTone(activeSample.phase) : null;
@@ -1210,6 +1318,31 @@ function TelemetryExperiencePanel({
     const touch = event.touches[0];
     if (touch) {
       updateScrub(touch.clientX);
+    }
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!samples.length) {
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      onScrub(clampIndex(activeIndex - 1, samples.length));
+    }
+
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onScrub(clampIndex(activeIndex + 1, samples.length));
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onScrub(0);
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      onScrub(samples.length - 1);
     }
   };
 
@@ -1290,13 +1423,25 @@ function TelemetryExperiencePanel({
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
         <div
           ref={chartRef}
-          className="minimal-card signal-sheen rounded-[22px] p-4 select-none sm:cursor-crosshair"
+          className={`minimal-card telemetry-scrubber signal-sheen rounded-[22px] p-4 select-none sm:cursor-crosshair ${FOCUS_RING}`}
           onPointerMove={handlePointer}
           onPointerEnter={handlePointer}
           onPointerLeave={() => onScrub(null)}
           onTouchMove={handleTouch}
           onTouchStart={handleTouch}
           onTouchEnd={() => onScrub(null)}
+          onKeyDown={handleKeyDown}
+          role="slider"
+          tabIndex={samples.length ? 0 : -1}
+          aria-label="Telemetry trace scrubber"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, samples.length - 1)}
+          aria-valuenow={activeIndex}
+          aria-valuetext={
+            activeSample
+              ? `${activeSample.elapsed.toFixed(1)} seconds, ${activeSample.speed} kilometers per hour`
+              : "No telemetry sample"
+          }
         >
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
             <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1439,7 +1584,7 @@ function LiveActionDock({
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const layout = getTrackLayout(layoutKey, circuitName);
   const activeSample =
-    telemetrySamples[clampIndex(scrubIndex, Math.max(1, telemetrySamples.length) - 1)] ?? null;
+    telemetrySamples[clampIndex(scrubIndex, Math.max(1, telemetrySamples.length))] ?? null;
   const phaseTone = activeSample ? getPhaseTone(activeSample.phase) : null;
   const scrubProgress =
     telemetrySamples.length > 1
@@ -1770,7 +1915,9 @@ function LiveActionDock({
                 key={driver.id}
                 type="button"
                 onClick={() => onSelect(driver.id)}
-                className="text-left"
+                aria-pressed={active}
+                aria-label={`Select ${driver.fullName}, position ${driver.standingPosition}`}
+                className={`text-left ${FOCUS_RING}`}
               >
                 <div
                   className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[15px] border px-2.5 py-2 transition-all duration-200 hover:-translate-y-0.5"
@@ -1944,11 +2091,13 @@ function FantasyActionPanel({
                   <button
                     type="button"
                     onClick={() => onToggleWatch(entry.driverId)}
+                    aria-pressed={watchlist.has(entry.driverId)}
+                    aria-label={`${watchlist.has(entry.driverId) ? "Remove" : "Add"} ${entry.label} from watchlist`}
                     className={`min-w-[88px] rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition ${
                       watchlist.has(entry.driverId)
                         ? "bg-[var(--team-accent-soft)] text-[var(--team-accent)]"
                         : "bg-[rgba(17,21,29,0.08)] text-[var(--foreground)]"
-                    }`}
+                    } ${FOCUS_RING}`}
                   >
                     {watchlist.has(entry.driverId) ? "Watching" : "Watch"}
                   </button>
@@ -1993,11 +2142,13 @@ function FantasyActionPanel({
                   <button
                     type="button"
                     onClick={() => onToggleWatch(entry.driverId)}
+                    aria-pressed={watchlist.has(entry.driverId)}
+                    aria-label={`${watchlist.has(entry.driverId) ? "Remove" : "Add"} ${entry.label} from watchlist`}
                     className={`min-w-[88px] rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition ${
                       watchlist.has(entry.driverId)
                         ? "bg-[var(--team-accent-soft)] text-[var(--team-accent)]"
                         : "bg-[rgba(17,21,29,0.08)] text-[var(--foreground)]"
-                    }`}
+                    } ${FOCUS_RING}`}
                   >
                     {watchlist.has(entry.driverId) ? "Added" : "Watch"}
                   </button>
@@ -2006,6 +2157,483 @@ function FantasyActionPanel({
             ))}
           </div>
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+function DashboardTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: DashboardTab;
+  onChange: (tab: DashboardTab) => void;
+}) {
+  return (
+    <div className="glass-panel rounded-[18px] p-2">
+      <div
+        className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6"
+        role="tablist"
+        aria-label="Dashboard sections"
+      >
+        {DASHBOARD_TABS.map((tab) => {
+          const active = activeTab === tab.id;
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(tab.id)}
+              className={`rounded-[12px] px-3 py-2.5 text-left transition ${FOCUS_RING} ${
+                active
+                  ? "bg-[var(--team-accent)] text-white shadow-[0_10px_20px_rgba(17,21,29,0.12)]"
+                  : "text-[var(--muted)] hover:bg-white/68 hover:text-[var(--foreground)]"
+              }`}
+            >
+              <span className="block text-sm font-semibold leading-tight">{tab.label}</span>
+              <span
+                className={`mt-0.5 block text-[10px] uppercase tracking-[0.14em] ${
+                  active ? "text-white/72" : "text-[var(--muted)]"
+                }`}
+              >
+                {tab.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TimingBoardPanel({
+  drivers,
+  selectedDriverId,
+  onSelect,
+}: {
+  drivers: DriverInsight[];
+  selectedDriverId: string;
+  onSelect: (driverId: string) => void;
+}) {
+  const leader = drivers[0] ?? null;
+  const biggestSignal = drivers
+    .slice()
+    .sort((a, b) => b.sentiment.score - a.sentiment.score)[0] ?? null;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Timing</div>
+            <FunBadge label="Expanded tower" tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            Full field order
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Driver rows now expose position, points, pace signal, recent lap average, and team color in one scannable table.
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatChip label="Classified" value={`${drivers.length}`} />
+          <StatChip label="Leader" value={leader?.abbreviation ?? "--"} accent={leader?.teamColor} />
+          <StatChip label="Hot signal" value={biggestSignal?.abbreviation ?? "--"} accent={biggestSignal?.teamColor} />
+        </div>
+      </div>
+
+      <div className="mt-5 overflow-x-auto hide-scrollbar">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(140px,1fr)_110px_110px_120px] gap-2 px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+            <span>Pos</span>
+            <span>Driver</span>
+            <span>Team</span>
+            <span>Avg lap</span>
+            <span>Points</span>
+            <span>Signal</span>
+          </div>
+          <div className="grid gap-2">
+            {drivers.map((driver) => {
+              const active = selectedDriverId === driver.id;
+
+              return (
+                <button
+                  key={driver.id}
+                  type="button"
+                  onClick={() => onSelect(driver.id)}
+                  aria-pressed={active}
+                  className={`grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(140px,1fr)_110px_110px_120px] items-center gap-2 rounded-[14px] border px-3 py-3 text-left transition hover:-translate-y-0.5 ${FOCUS_RING}`}
+                  style={{
+                    borderColor: active ? rgba(driver.teamColor, 0.4) : "rgba(17,21,29,0.08)",
+                    background: active
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.16)}, rgba(255,255,255,0.82))`
+                      : "rgba(255,255,255,0.68)",
+                  }}
+                >
+                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                    P{driver.standingPosition}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
+                      {driver.fullName}
+                    </span>
+                    <span className="telemetry-text mt-0.5 block text-[11px] text-[var(--muted)]">
+                      #{driver.permanentNumber} / {driver.abbreviation}
+                    </span>
+                  </span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-7 w-1.5 rounded-full"
+                      style={{ background: `#${driver.teamColor}` }}
+                    />
+                    <span className="truncate text-xs text-[var(--muted)]">
+                      {driver.teamName}
+                    </span>
+                  </span>
+                  <span className="telemetry-text text-sm text-[var(--foreground)]">
+                    {formatLapTime(driver.avgLap)}
+                  </span>
+                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                    {driver.points}
+                  </span>
+                  <span
+                    className="inline-flex w-fit rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]"
+                    style={{
+                      color: `#${driver.teamColor}`,
+                      background: rgba(driver.teamColor, 0.12),
+                    }}
+                  >
+                    {getDriverSignal(driver)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function StatsPanel({
+  drivers,
+}: {
+  drivers: DriverInsight[];
+}) {
+  const constructors = buildConstructorStandings(drivers);
+  const topDrivers = drivers.slice(0, 6);
+  const podiumLeader = drivers
+    .slice()
+    .sort((a, b) => b.totalPodiums - a.totalPodiums)[0] ?? null;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Stats</div>
+            <FunBadge label="Championship lens" tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            Standings and form
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Constructor totals, driver form, and career context grouped into a cleaner stats workspace.
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatChip label="Teams" value={`${constructors.length}`} />
+          <StatChip label="Top podiums" value={podiumLeader?.abbreviation ?? "--"} accent={podiumLeader?.teamColor} />
+          <StatChip label="Season field" value={`${drivers.length}`} />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Constructors</div>
+              <div className="section-title mt-2 text-base font-semibold">Team table</div>
+            </div>
+            <Trophy size={16} className="text-[var(--muted)]" />
+          </div>
+          <div className="grid gap-2">
+            {constructors.map((team, index) => (
+              <div
+                key={team.teamName}
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3"
+              >
+                <span className="telemetry-text w-8 text-sm font-semibold">P{index + 1}</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ background: `#${team.teamColor}` }}
+                    />
+                    <span className="truncate text-sm font-semibold text-[var(--foreground)]">
+                      {team.teamName}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-[var(--muted)]">
+                    {team.drivers.join(" / ")} / {team.wins} wins / {team.podiums} podiums
+                  </div>
+                </div>
+                <span className="telemetry-text text-sm font-semibold">{team.points} pts</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Driver form</div>
+              <div className="section-title mt-2 text-base font-semibold">Top six pace traces</div>
+            </div>
+            <Activity size={16} className="text-[var(--muted)]" />
+          </div>
+          <div className="grid gap-3">
+            {topDrivers.map((driver) => (
+              <div
+                key={driver.id}
+                className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 p-3 sm:grid-cols-[180px_minmax(0,1fr)_90px] sm:items-center"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                    {driver.fullName}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">{driver.teamName}</div>
+                </div>
+                <div className="h-14">
+                  <Sparkline
+                    values={driver.paceSeries}
+                    stroke={rgba(driver.teamColor, 0.95)}
+                    fill={rgba(driver.teamColor, 0.08)}
+                    height={70}
+                  />
+                </div>
+                <div className="text-right">
+                  <div className="telemetry-text text-sm font-semibold">
+                    {driver.sentiment.score}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                    pulse
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function WeekendInfoPanel({
+  dashboard,
+}: {
+  dashboard: DashboardData;
+}) {
+  const feeds = [
+    dashboard.sources.schedule,
+    dashboard.sources.telemetry,
+    dashboard.sources.fantasy,
+  ];
+  const nextSession = dashboard.nextSession;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Weekend</div>
+            <FunBadge label="Info desk" tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            Event context
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Session schedule, track timing, source health, and circuit metadata in one quieter reference view.
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatChip label="Season" value={`${dashboard.season}`} />
+          <StatChip label="Sessions" value={`${dashboard.nextSessions.length}`} />
+          <StatChip label="Circuit" value={dashboard.trackMap.circuitName} />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Schedule</div>
+              <div className="section-title mt-2 text-base font-semibold">
+                {nextSession ? `${nextSession.circuitName} weekend` : "Awaiting published weekend"}
+              </div>
+            </div>
+            <Flag size={16} className="text-[var(--muted)]" />
+          </div>
+          <div className="grid gap-2">
+            {dashboard.nextSessions.length ? (
+              dashboard.nextSessions.map((session, index) => (
+                <div
+                  key={session.sessionKey}
+                  className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 sm:grid-cols-[52px_minmax(0,1fr)_auto] sm:items-center"
+                >
+                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                      {session.sessionName}
+                    </div>
+                    <div className="truncate text-xs text-[var(--muted)]">
+                      {session.location}, {session.countryName}
+                    </div>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <div className="telemetry-text text-sm font-semibold">
+                      {formatTrackDate(session.dateStart, session.gmtOffset)}
+                    </div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {formatSessionDate(session.dateStart)}
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 text-sm text-[var(--muted)]">
+                No upcoming sessions are published in the current feed snapshot.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+            <div className="eyebrow">Circuit card</div>
+            <div className="section-title mt-2 text-base font-semibold">
+              {dashboard.trackMap.circuitName}
+            </div>
+            <div className="mt-3 grid gap-2">
+              <MiniStat icon={<MapIcon size={14} />} label="Layout" value={dashboard.trackMap.layoutKey} />
+              <MiniStat icon={<Users size={14} />} label="Cars mapped" value={`${dashboard.trackMap.cars.length}`} />
+              <MiniStat
+                icon={<Radio size={14} />}
+                label="Telemetry"
+                value={dashboard.telemetrySamples.length ? `${dashboard.telemetrySamples.length} samples` : "--"}
+              />
+            </div>
+          </div>
+
+          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+            <div className="eyebrow">Source health</div>
+            <div className="mt-3 grid gap-2">
+              {feeds.map((feed) => {
+                const tone = getFeedTone(feed.status);
+
+                return (
+                  <div
+                    key={feed.label}
+                    className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-[var(--foreground)]">
+                        {feed.label}
+                      </div>
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.className}`}
+                      >
+                        {tone.label}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--muted)]">{feed.source}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function WatchlistPanel({
+  drivers,
+  watchlist,
+  onToggleWatch,
+}: {
+  drivers: DriverInsight[];
+  watchlist: Set<string>;
+  onToggleWatch: (driverId: string) => void;
+}) {
+  const watchedDrivers = drivers.filter((driver) => watchlist.has(driver.id));
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Fantasy watchlist</div>
+            <FunBadge label={`${watchedDrivers.length} saved`} tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            Shortlist board
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Drivers added from value and riser cards are now promoted into a proper workspace.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {watchedDrivers.length ? (
+          watchedDrivers.map((driver) => (
+            <div
+              key={driver.id}
+              className="minimal-card team-tint rounded-[20px] p-4 sm:rounded-[22px]"
+              style={{ ["--team-tint" as string]: rgba(driver.teamColor, 0.1) }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                    {driver.fullName}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--muted)]">{driver.teamName}</div>
+                </div>
+                <span
+                  className="telemetry-text rounded-full px-2.5 py-1 text-[10px] font-semibold"
+                  style={{
+                    background: rgba(driver.teamColor, 0.12),
+                    color: `#${driver.teamColor}`,
+                  }}
+                >
+                  {driver.abbreviation}
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <StatChip label="Pts" value={`${driver.points}`} accent={driver.teamColor} />
+                <StatChip label="Pulse" value={`${driver.sentiment.score}`} />
+                <StatChip label="Avg" value={formatLapTime(driver.avgLap)} />
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggleWatch(driver.id)}
+                className={`mt-4 rounded-full bg-[rgba(17,21,29,0.08)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--foreground)] ${FOCUS_RING}`}
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="minimal-card rounded-[20px] p-5 text-sm text-[var(--muted)] sm:rounded-[22px] md:col-span-2 xl:col-span-3">
+            Add drivers from the value or riser lists below to build a shortlist.
+          </div>
+        )}
       </div>
     </Panel>
   );
@@ -2044,20 +2672,34 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const [scrubIndex, setScrubIndex] = useState(
     Math.max(0, data.telemetrySamples.length - 1),
   );
+  const [hasMounted, setHasMounted] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
 
   useEffect(() => {
-    const rawPrefs = window.localStorage.getItem("pphq-dashboard-prefs/v1");
-    if (!rawPrefs) {
-      return;
-    }
+    const frame = window.requestAnimationFrame(() => setHasMounted(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
-    try {
-      const parsed = JSON.parse(rawPrefs) as {
-        selectedDriverId?: string;
-        watchlist?: string[];
-      };
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const rawPrefs = window.localStorage.getItem(DASHBOARD_PREFS_KEY);
+      if (!rawPrefs) {
+        setPrefsLoaded(true);
+        return;
+      }
 
-      const frame = window.requestAnimationFrame(() => {
+      try {
+        const parsed = JSON.parse(rawPrefs) as {
+          activeTab?: string;
+          selectedDriverId?: string;
+          watchlist?: string[];
+        };
+
+        if (isDashboardTab(parsed.activeTab)) {
+          setActiveTab(parsed.activeTab);
+        }
+
         if (
           parsed.selectedDriverId &&
           data.standings.some((driver) => driver.id === parsed.selectedDriverId)
@@ -2068,23 +2710,34 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         if (Array.isArray(parsed.watchlist)) {
           setWatchlist(new Set(parsed.watchlist));
         }
-      });
+      } catch {
+        window.localStorage.removeItem(DASHBOARD_PREFS_KEY);
+      } finally {
+        setPrefsLoaded(true);
+      }
+    });
 
-      return () => window.cancelAnimationFrame(frame);
-    } catch {
-      window.localStorage.removeItem("pphq-dashboard-prefs/v1");
-    }
+    return () => window.cancelAnimationFrame(frame);
   }, [data.standings]);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      "pphq-dashboard-prefs/v1",
-      JSON.stringify({
-        selectedDriverId,
-        watchlist: Array.from(watchlist),
-      }),
-    );
-  }, [selectedDriverId, watchlist]);
+    if (!prefsLoaded) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        DASHBOARD_PREFS_KEY,
+        JSON.stringify({
+          activeTab,
+          selectedDriverId,
+          watchlist: Array.from(watchlist),
+        }),
+      );
+    } catch {
+      // Preferences are a convenience; private browsing/storage limits should not affect the dashboard.
+    }
+  }, [activeTab, prefsLoaded, selectedDriverId, watchlist]);
 
   const effectiveSelectedDriverId = useMemo(
     () =>
@@ -2094,7 +2747,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     [data.standings, selectedDriverId],
   );
   const effectiveScrubIndex = useMemo(
-    () => clampIndex(scrubIndex, Math.max(1, data.telemetrySamples.length) - 1),
+    () => clampIndex(scrubIndex, Math.max(1, data.telemetrySamples.length)),
     [data.telemetrySamples.length, scrubIndex],
   );
   const selectedDriver = useMemo(
@@ -2133,14 +2786,15 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         <button
           type="button"
           onClick={() => void refetch()}
-          className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em]"
+          aria-label="Refresh dashboard data"
+          className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
         >
           <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
           {isFetching ? "Refreshing" : "Refresh now"}
         </button>
       </div>
 
-      {!isOnline || error ? (
+      {hasMounted && (!isOnline || error) ? (
         <div className="glass-panel rounded-[20px] px-4 py-3 text-sm text-[var(--foreground)]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="eyebrow">Status</span>
@@ -2170,27 +2824,129 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         snapshotNow={snapshotNow}
       />
 
-      <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-        <div className="grid gap-4 sm:gap-5">
-          <TelemetryExperiencePanel
-            accent={accent}
-            driverLabel={data.telemetryDriverLabel}
+      <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      {activeTab === "overview" ? (
+        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <div className="grid gap-4 sm:gap-5">
+            <TelemetryExperiencePanel
+              accent={accent}
+              driverLabel={data.telemetryDriverLabel}
+              insights={data.telemetryInsights}
+              sourceMeta={data.sources.telemetry}
+              samples={data.telemetrySamples}
+              session={data.telemetrySession}
+              scrubIndex={effectiveScrubIndex}
+              onScrub={(index) =>
+                setScrubIndex(
+                  index === null
+                    ? Math.max(0, data.telemetrySamples.length - 1)
+                    : index,
+                )
+              }
+            />
+
+            <PerformanceProfilePanel driver={selectedDriver} />
+
+            <FantasyActionPanel
+              fantasy={data.fantasy}
+              sourceMeta={data.sources.fantasy}
+              watchlist={watchlist}
+              onToggleWatch={toggleWatch}
+            />
+          </div>
+
+          <LiveActionDock
+            circuitName={data.trackMap.circuitName}
+            layoutKey={data.trackMap.layoutKey}
+            cars={data.trackMap.cars}
+            selectedDriver={selectedDriver}
             insights={data.telemetryInsights}
-            sourceMeta={data.sources.telemetry}
-            samples={data.telemetrySamples}
-            session={data.telemetrySession}
+            telemetrySamples={data.telemetrySamples}
             scrubIndex={effectiveScrubIndex}
-            onScrub={(index) =>
-              setScrubIndex(
-                index === null
-                  ? Math.max(0, data.telemetrySamples.length - 1)
-                  : index,
-              )
-            }
+            drivers={data.standings}
+            selectedDriverId={effectiveSelectedDriverId}
+            onSelect={setSelectedDriverId}
           />
+        </div>
+      ) : null}
 
+      {activeTab === "timing" ? (
+        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
+          <TimingBoardPanel
+            drivers={data.standings}
+            selectedDriverId={effectiveSelectedDriverId}
+            onSelect={setSelectedDriverId}
+          />
+          <LiveActionDock
+            circuitName={data.trackMap.circuitName}
+            layoutKey={data.trackMap.layoutKey}
+            cars={data.trackMap.cars}
+            selectedDriver={selectedDriver}
+            insights={data.telemetryInsights}
+            telemetrySamples={data.telemetrySamples}
+            scrubIndex={effectiveScrubIndex}
+            drivers={data.standings}
+            selectedDriverId={effectiveSelectedDriverId}
+            onSelect={setSelectedDriverId}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "telemetry" ? (
+        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
+          <div className="grid gap-4 sm:gap-5">
+            <TelemetryExperiencePanel
+              accent={accent}
+              driverLabel={data.telemetryDriverLabel}
+              insights={data.telemetryInsights}
+              sourceMeta={data.sources.telemetry}
+              samples={data.telemetrySamples}
+              session={data.telemetrySession}
+              scrubIndex={effectiveScrubIndex}
+              onScrub={(index) =>
+                setScrubIndex(
+                  index === null
+                    ? Math.max(0, data.telemetrySamples.length - 1)
+                    : index,
+                )
+              }
+            />
+            <PerformanceProfilePanel driver={selectedDriver} />
+          </div>
+          <LiveActionDock
+            circuitName={data.trackMap.circuitName}
+            layoutKey={data.trackMap.layoutKey}
+            cars={data.trackMap.cars}
+            selectedDriver={selectedDriver}
+            insights={data.telemetryInsights}
+            telemetrySamples={data.telemetrySamples}
+            scrubIndex={effectiveScrubIndex}
+            drivers={data.standings}
+            selectedDriverId={effectiveSelectedDriverId}
+            onSelect={setSelectedDriverId}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "stats" ? (
+        <div className="grid gap-4 sm:gap-5">
+          <StatsPanel drivers={data.standings} />
           <PerformanceProfilePanel driver={selectedDriver} />
+        </div>
+      ) : null}
 
+      {activeTab === "weekend" ? (
+        <WeekendInfoPanel dashboard={data} />
+      ) : null}
+
+      {activeTab === "fantasy" ? (
+        <div className="grid gap-4 sm:gap-5">
+          <WatchlistPanel
+            drivers={data.standings}
+            watchlist={watchlist}
+            onToggleWatch={toggleWatch}
+          />
           <FantasyActionPanel
             fantasy={data.fantasy}
             sourceMeta={data.sources.fantasy}
@@ -2198,20 +2954,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             onToggleWatch={toggleWatch}
           />
         </div>
-
-        <LiveActionDock
-          circuitName={data.trackMap.circuitName}
-          layoutKey={data.trackMap.layoutKey}
-          cars={data.trackMap.cars}
-          selectedDriver={selectedDriver}
-          insights={data.telemetryInsights}
-          telemetrySamples={data.telemetrySamples}
-          scrubIndex={effectiveScrubIndex}
-          drivers={data.standings}
-          selectedDriverId={effectiveSelectedDriverId}
-          onSelect={setSelectedDriverId}
-        />
-      </div>
+      ) : null}
 
       <footer className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
         <span className="glass-pill rounded-full px-3 py-1.5">
