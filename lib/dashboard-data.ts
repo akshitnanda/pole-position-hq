@@ -28,7 +28,7 @@ type OpenF1Driver = {
   driver_number: number;
   team_name: string;
   team_colour: string;
-  headshot_url: string;
+  headshot_url: string | null;
   full_name: string;
   first_name: string;
   last_name: string;
@@ -82,6 +82,26 @@ const OPEN_F1_BASE =
   process.env.OPENF1_API_BASE_URL?.replace(/\/$/, "") ?? "https://api.openf1.org/v1";
 const GRAPHQL_ENDPOINT =
   process.env.F1_GRAPHQL_ENDPOINT ?? "https://f1-graphql.davideladisa.it/graphql";
+const REQUEST_TIMEOUT_MS = 8_000;
+const DRIVER_FALLBACK_IMAGE = "https://media.formula1.com/d_driver_fallback_image.png";
+
+function normalizeTeamColor(value: string | null | undefined) {
+  const normalized = (value ?? "").replace("#", "").trim();
+  return /^[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : "E10600";
+}
+
+function resolveHeadshotUrl(value: string | null | undefined) {
+  if (!value) {
+    return DRIVER_FALLBACK_IMAGE;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : DRIVER_FALLBACK_IMAGE;
+  } catch {
+    return DRIVER_FALLBACK_IMAGE;
+  }
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
@@ -90,6 +110,7 @@ async function fetchJson<T>(url: string): Promise<T> {
       "user-agent": "PolePositionHQ/1.0",
     },
     next: { revalidate: 120 },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -108,6 +129,7 @@ async function fetchGraphQL<T>(query: string): Promise<T> {
     },
     body: JSON.stringify({ query }),
     next: { revalidate: 120 },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -261,10 +283,8 @@ function computeDriverInsights(
       points: standing.points,
       championshipWon: standing.championshipWon,
       teamName: openDriver?.team_name ?? "Scuderia Feed",
-      teamColor: openDriver?.team_colour ?? "FF5C39",
-      headshotUrl:
-        openDriver?.headshot_url ??
-        "https://media.formula1.com/d_driver_fallback_image.png",
+      teamColor: normalizeTeamColor(openDriver?.team_colour),
+      headshotUrl: resolveHeadshotUrl(openDriver?.headshot_url),
       totalRaceWins: standing.driver.totalRaceWins,
       totalPodiums: standing.driver.totalPodiums,
       totalPolePositions: standing.driver.totalPolePositions,
@@ -334,6 +354,7 @@ async function fetchFantasyBoard(
             "user-agent": "PolePositionHQ/1.0",
           },
           next: { revalidate: 180 },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
 
         if (!response.ok) {
@@ -445,7 +466,7 @@ function buildTrackCars(
       return {
         driverId: driver?.id ?? `driver-${entry.driver_number}`,
         abbreviation: driver?.abbreviation ?? String(entry.driver_number),
-        teamColor: driver?.teamColor ?? "FFFFFF",
+        teamColor: normalizeTeamColor(driver?.teamColor ?? "FFFFFF"),
         position: entry.position,
         gapLabel: formatGap(entry.position),
       };
@@ -614,9 +635,8 @@ function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight
     points: 0,
     championshipWon: false,
     teamName: driver.team_name,
-    teamColor: driver.team_colour,
-    headshotUrl:
-      driver.headshot_url ?? "https://media.formula1.com/d_driver_fallback_image.png",
+    teamColor: normalizeTeamColor(driver.team_colour),
+    headshotUrl: resolveHeadshotUrl(driver.headshot_url),
     totalRaceWins: 0,
     totalPodiums: 0,
     totalPolePositions: 0,
