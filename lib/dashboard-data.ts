@@ -1,12 +1,18 @@
 import {
+  ActivityItem,
+  ActivitySource,
   DashboardData,
   DriverInsight,
   FantasyEntry,
+  SourcePulse,
   SessionSummary,
   TelemetryInsights,
   TelemetrySample,
+  TimingDelta,
   TrackCar,
+  UpgradeSignal,
 } from "./types";
+import { XMLParser } from "fast-xml-parser";
 
 type OpenF1Session = {
   meeting_key: number;
@@ -78,12 +84,63 @@ type SeasonStandingRow = {
   };
 };
 
+type RedditListing = {
+  data?: {
+    children?: Array<{
+      data?: {
+        id?: string;
+        title?: string;
+        permalink?: string;
+        url?: string;
+        selftext?: string;
+        created_utc?: number;
+        score?: number;
+        num_comments?: number;
+        link_flair_text?: string | null;
+      };
+    }>;
+  };
+};
+
+type XRecentSearch = {
+  data?: Array<{
+    id: string;
+    text: string;
+    created_at?: string;
+    public_metrics?: {
+      retweet_count?: number;
+      reply_count?: number;
+      like_count?: number;
+      quote_count?: number;
+    };
+  }>;
+};
+
 const OPEN_F1_BASE =
   process.env.OPENF1_API_BASE_URL?.replace(/\/$/, "") ?? "https://api.openf1.org/v1";
 const GRAPHQL_ENDPOINT =
   process.env.F1_GRAPHQL_ENDPOINT ?? "https://f1-graphql.davideladisa.it/graphql";
 const REQUEST_TIMEOUT_MS = 8_000;
 const DRIVER_FALLBACK_IMAGE = "https://media.formula1.com/d_driver_fallback_image.png";
+const NEWS_REVALIDATE_SECONDS = 180;
+
+const ACTIVITY_FEEDS = [
+  {
+    source: "motorsport" as const,
+    label: "Motorsport.com",
+    url: process.env.MOTORSPORT_RSS_URL ?? "https://www.motorsport.com/rss/f1/news/",
+  },
+  {
+    source: "the-race" as const,
+    label: "The Race",
+    url: process.env.THE_RACE_RSS_URL ?? "https://www.the-race.com/category/formula-1",
+  },
+];
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "",
+});
 
 function normalizeTeamColor(value: string | null | undefined) {
   const normalized = (value ?? "").replace("#", "").trim();
@@ -150,6 +207,472 @@ async function fetchGraphQL<T>(query: string): Promise<T> {
   }
 
   return payload.data;
+}
+
+async function fetchText(url: string, revalidate = NEWS_REVALIDATE_SECONDS): Promise<string> {
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/rss+xml, application/atom+xml, text/xml, text/html, */*",
+      "user-agent": "PolePositionHQ/1.0",
+    },
+    next: { revalidate },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url} with ${response.status}`);
+  }
+
+  return response.text();
+}
+
+function asArray<T>(value: T | T[] | undefined | null): T[] {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+function stripMarkup(value: unknown): string {
+  return String(value ?? "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#8217;|&rsquo;/g, "'")
+    .replace(/&#8216;|&lsquo;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeUrl(value: unknown, baseUrl: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return baseUrl;
+  }
+
+  try {
+    return new URL(raw, baseUrl).toString();
+  } catch {
+    return baseUrl;
+  }
+}
+
+function classifyActivity(text: string): ActivityItem["category"] {
+  const normalized = text.toLowerCase();
+
+  if (/\b(upgrade|floor|wing|sidepod|package|aero|technical|spec)\b/.test(normalized)) {
+    return "upgrade";
+  }
+
+  if (/\b(fp1|fp2|fp3|qualifying|sprint|lap|pace|sector|timing|result)\b/.test(normalized)) {
+    return "timing";
+  }
+
+  if (/\b(strategy|tyre|tire|stint|undercut|overcut|pit)\b/.test(normalized)) {
+    return "strategy";
+  }
+
+  if (/\b(sponsor|business|deal|commercial|revenue|cost cap|contract)\b/.test(normalized)) {
+    return "business";
+  }
+
+  if (/\b(breaking|declares|penalty|investigation|disqualified|crash)\b/.test(normalized)) {
+    return "breaking";
+  }
+
+  return "community";
+}
+
+function buildActivityTags(text: string, drivers: DriverInsight[]) {
+  const normalized = text.toLowerCase();
+  const tags = new Set<string>();
+
+  drivers.forEach((driver) => {
+    if (
+      normalized.includes(driver.lastName.toLowerCase()) ||
+      normalized.includes(driver.teamName.toLowerCase())
+    ) {
+      tags.add(driver.abbreviation);
+    }
+  });
+
+  [
+    "upgrade",
+    "wing",
+    "floor",
+    "qualifying",
+    "sprint",
+    "race",
+    "penalty",
+    "strategy",
+    "tyre",
+  ].forEach((keyword) => {
+    if (normalized.includes(keyword)) {
+      tags.add(keyword);
+    }
+  });
+
+  return Array.from(tags).slice(0, 4);
+}
+
+function scoreActivity(
+  title: string,
+  summary: string,
+  publishedAt: string | null,
+  engagement = 0,
+) {
+  const text = `${title} ${summary}`.toLowerCase();
+  const recencyHours = publishedAt
+    ? Math.max(0, (Date.now() - new Date(publishedAt).getTime()) / 3_600_000)
+    : 36;
+  const recencyScore = Math.max(0, 46 - recencyHours * 2.4);
+  const keywordScore = [
+    "breaking",
+    "upgrade",
+    "floor",
+    "qualifying",
+    "race",
+    "penalty",
+    "strategy",
+    "disqualified",
+  ].reduce((score, keyword) => score + (text.includes(keyword) ? 7 : 0), 0);
+  const engagementScore = Math.min(26, Math.log10(Math.max(1, engagement)) * 10);
+
+  return Math.max(12, Math.min(99, Math.round(recencyScore + keywordScore + engagementScore)));
+}
+
+function engagementLabel(value: number) {
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+
+  if (value > 0) {
+    return String(Math.round(value));
+  }
+
+  return "scan";
+}
+
+function dedupeActivityItems(items: ActivityItem[]) {
+  const seen = new Set<string>();
+
+  return items
+    .filter((item) => {
+      const key = item.url || item.title.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const dateB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return b.signalScore - a.signalScore || dateB - dateA;
+    });
+}
+
+function normalizeRssItems(
+  payload: string,
+  source: Exclude<ActivitySource, "x" | "reddit" | "fallback">,
+  sourceLabel: string,
+  baseUrl: string,
+  drivers: DriverInsight[],
+): ActivityItem[] {
+  if (!payload.trim().startsWith("<")) {
+    return [];
+  }
+
+  const parsed = xmlParser.parse(payload) as {
+    rss?: { channel?: { item?: unknown | unknown[] } };
+    feed?: { entry?: unknown | unknown[] };
+  };
+
+  const rssItems = asArray(parsed.rss?.channel?.item as Record<string, unknown> | undefined);
+  const atomItems = asArray(parsed.feed?.entry as Record<string, unknown> | undefined);
+
+  return [...rssItems, ...atomItems].slice(0, 8).flatMap((item, index) => {
+    if (typeof item !== "object" || item === null) {
+      return [];
+    }
+
+    const entry = item as Record<string, unknown>;
+    const title = stripMarkup(entry.title);
+    if (!title) {
+      return [];
+    }
+
+    const summary = stripMarkup(entry.description ?? entry.summary ?? entry.content).slice(0, 220);
+    const rawLink =
+      typeof entry.link === "object" && entry.link !== null
+        ? (entry.link as Record<string, unknown>).href
+        : entry.link;
+    const url = normalizeUrl(rawLink ?? entry.guid, baseUrl);
+    const publishedAt = String(entry.pubDate ?? entry.published ?? entry.updated ?? "") || null;
+    const normalizedDate = publishedAt ? new Date(publishedAt).toISOString() : null;
+    const signalScore = scoreActivity(title, summary, normalizedDate);
+
+    return {
+      id: `${source}-${index}-${Buffer.from(url).toString("base64url").slice(0, 8)}`,
+      source,
+      sourceLabel,
+      title,
+      url,
+      publishedAt: normalizedDate,
+      summary,
+      category: classifyActivity(`${title} ${summary}`),
+      signalScore,
+      engagementLabel: engagementLabel(0),
+      tags: buildActivityTags(`${title} ${summary}`, drivers),
+    };
+  });
+}
+
+function normalizeTheRaceHtml(payload: string, drivers: DriverInsight[]): ActivityItem[] {
+  const matches = Array.from(
+    payload.matchAll(/<a[^>]+href="([^"]*\/formula-1\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi),
+  );
+
+  return matches.slice(0, 12).flatMap((match, index) => {
+    const title = stripMarkup(match[2]);
+    if (!title || title.length < 18 || title.toLowerCase().includes("formula 1")) {
+      return [];
+    }
+
+    const url = normalizeUrl(match[1], "https://www.the-race.com");
+    const summary = title.length > 160 ? title.slice(0, 157) : title;
+
+    return {
+      id: `the-race-html-${index}-${Buffer.from(url).toString("base64url").slice(0, 8)}`,
+      source: "the-race" as const,
+      sourceLabel: "The Race",
+      title,
+      url,
+      publishedAt: null,
+      summary,
+      category: classifyActivity(title),
+      signalScore: scoreActivity(title, summary, null),
+      engagementLabel: "scan",
+      tags: buildActivityTags(title, drivers),
+    };
+  });
+}
+
+async function fetchEditorialActivity(drivers: DriverInsight[]) {
+  const results = await Promise.allSettled(
+    ACTIVITY_FEEDS.map(async (feed) => {
+      const payload = await fetchText(feed.url);
+      const rssItems = normalizeRssItems(
+        payload,
+        feed.source,
+        feed.label,
+        feed.url,
+        drivers,
+      );
+      const items =
+        rssItems.length || feed.source !== "the-race"
+          ? rssItems
+          : normalizeTheRaceHtml(payload, drivers);
+
+      return { ...feed, items };
+    }),
+  );
+
+  const items: ActivityItem[] = [];
+  const pulse: SourcePulse[] = [];
+
+  results.forEach((result, index) => {
+    const feed = ACTIVITY_FEEDS[index];
+    if (result.status === "fulfilled") {
+      items.push(...result.value.items);
+      pulse.push({
+        source: feed.source,
+        label: feed.label,
+        status: result.value.items.length ? "live" : "empty",
+        count: result.value.items.length,
+        updatedAt: result.value.items.length ? new Date().toISOString() : null,
+        note: result.value.items.length
+          ? "Editorial feed normalized for the command surface."
+          : "Feed responded but did not expose readable F1 activity items.",
+      });
+      return;
+    }
+
+    pulse.push({
+      source: feed.source,
+      label: feed.label,
+      status: "fallback",
+      count: 0,
+      updatedAt: null,
+      note: "Editorial feed was unreachable during this snapshot.",
+    });
+  });
+
+  return { items, pulse };
+}
+
+async function fetchRedditActivity(drivers: DriverInsight[]) {
+  try {
+    const payload = await fetchJson<RedditListing>(
+      "https://www.reddit.com/r/formula1/hot.json?limit=12",
+    );
+    const posts = payload.data?.children ?? [];
+    const items = posts.flatMap<ActivityItem>((child) => {
+      const post = child.data;
+      if (!post?.id || !post.title) {
+        return [];
+      }
+
+      const engagement = (post.score ?? 0) + (post.num_comments ?? 0) * 2;
+      const publishedAt = post.created_utc
+        ? new Date(post.created_utc * 1000).toISOString()
+        : null;
+      const summary = stripMarkup(post.selftext).slice(0, 180);
+
+      return {
+        id: `reddit-${post.id}`,
+        source: "reddit",
+        sourceLabel: "r/formula1",
+        title: post.title,
+        url: normalizeUrl(post.permalink ?? post.url, "https://www.reddit.com"),
+        publishedAt,
+        summary,
+        category: "community",
+        signalScore: scoreActivity(post.title, summary, publishedAt, engagement),
+        engagementLabel: engagementLabel(engagement),
+        tags: [
+          ...(post.link_flair_text ? [post.link_flair_text] : []),
+          ...buildActivityTags(`${post.title} ${summary}`, drivers),
+        ].slice(0, 4),
+      };
+    });
+
+    const pulse: SourcePulse = {
+      source: "reddit",
+      label: "Reddit",
+      status: items.length ? "live" : "empty",
+      count: items.length,
+      updatedAt: items.length ? new Date().toISOString() : null,
+      note: "Community activity from r/formula1 hot posts.",
+    };
+
+    return {
+      items,
+      pulse,
+    };
+  } catch {
+    const pulse: SourcePulse = {
+      source: "reddit",
+      label: "Reddit",
+      status: "fallback",
+      count: 0,
+      updatedAt: null,
+      note: "Reddit activity was unavailable during this snapshot.",
+    };
+
+    return {
+      items: [] as ActivityItem[],
+      pulse,
+    };
+  }
+}
+
+async function fetchXActivity(drivers: DriverInsight[], raceLabel: string) {
+  const token = process.env.X_BEARER_TOKEN;
+
+  if (!token) {
+    const pulse: SourcePulse = {
+      source: "x",
+      label: "X",
+      status: "fallback",
+      count: 0,
+      updatedAt: null,
+      note: "Set X_BEARER_TOKEN to enable recent-search activity.",
+    };
+
+    return {
+      items: [] as ActivityItem[],
+      pulse,
+    };
+  }
+
+  const query = encodeURIComponent(
+    `("F1" OR "Formula 1" OR "${raceLabel}") (upgrade OR qualifying OR race OR sprint OR penalty OR pace) lang:en -is:retweet`,
+  );
+
+  try {
+    const response = await fetch(
+      `https://api.x.com/2/tweets/search/recent?query=${query}&max_results=10&tweet.fields=created_at,public_metrics`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          "user-agent": "PolePositionHQ/1.0",
+        },
+        next: { revalidate: NEWS_REVALIDATE_SECONDS },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`X recent search failed with ${response.status}`);
+    }
+
+    const payload = (await response.json()) as XRecentSearch;
+    const items = (payload.data ?? []).map<ActivityItem>((post) => {
+      const engagement =
+        (post.public_metrics?.like_count ?? 0) +
+        (post.public_metrics?.retweet_count ?? 0) * 2 +
+        (post.public_metrics?.reply_count ?? 0) * 2 +
+        (post.public_metrics?.quote_count ?? 0) * 2;
+
+      return {
+        id: `x-${post.id}`,
+        source: "x",
+        sourceLabel: "X",
+        title: stripMarkup(post.text).slice(0, 130),
+        url: `https://x.com/i/web/status/${post.id}`,
+        publishedAt: post.created_at ?? null,
+        summary: stripMarkup(post.text).slice(0, 220),
+        category: classifyActivity(post.text),
+        signalScore: scoreActivity(post.text, "", post.created_at ?? null, engagement),
+        engagementLabel: engagementLabel(engagement),
+        tags: buildActivityTags(post.text, drivers),
+      };
+    });
+
+    const pulse: SourcePulse = {
+      source: "x",
+      label: "X",
+      status: items.length ? "live" : "empty",
+      count: items.length,
+      updatedAt: items.length ? new Date().toISOString() : null,
+      note: "Recent-search activity from the configured X API app.",
+    };
+
+    return {
+      items,
+      pulse,
+    };
+  } catch {
+    const pulse: SourcePulse = {
+      source: "x",
+      label: "X",
+      status: "fallback",
+      count: 0,
+      updatedAt: null,
+      note: "X recent search failed for this snapshot.",
+    };
+
+    return {
+      items: [] as ActivityItem[],
+      pulse,
+    };
+  }
 }
 
 function mapSession(session: OpenF1Session): SessionSummary {
@@ -656,6 +1179,216 @@ function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight
   }));
 }
 
+function buildFallbackActivity(
+  drivers: DriverInsight[],
+  raceLabel: string,
+): ActivityItem[] {
+  const leadDriver = drivers[0];
+  const valueDriver = drivers
+    .slice()
+    .sort((a, b) => b.sentiment.delta - a.sentiment.delta)[0];
+
+  return [
+    {
+      id: "fallback-news-upgrades",
+      source: "fallback",
+      sourceLabel: "Product model",
+      title: `${raceLabel} upgrade watch opens across the front of the field`,
+      url: "https://www.motorsport.com/rss/",
+      publishedAt: null,
+      summary:
+        "Editorial sources are temporarily unavailable, so the dashboard is holding a model-generated upgrade watch until the next successful news pull.",
+      category: "upgrade",
+      signalScore: 58,
+      engagementLabel: "model",
+      tags: ["upgrade", leadDriver?.abbreviation ?? "F1"].filter(Boolean),
+    },
+    {
+      id: "fallback-news-timing",
+      source: "fallback",
+      sourceLabel: "Product model",
+      title: `${leadDriver?.fullName ?? "The championship leader"} sets the timing benchmark`,
+      url: "https://api.openf1.org/v1",
+      publishedAt: null,
+      summary:
+        "Timing context is derived from OpenF1 lap averages and standings while live editorial/social feeds recover.",
+      category: "timing",
+      signalScore: 52,
+      engagementLabel: "model",
+      tags: ["timing", valueDriver?.abbreviation ?? "pace"].filter(Boolean),
+    },
+  ];
+}
+
+function buildConstructorContext(drivers: DriverInsight[]) {
+  const teams = new Map<
+    string,
+    {
+      teamName: string;
+      teamColor: string;
+      points: number;
+      drivers: string[];
+    }
+  >();
+
+  drivers.forEach((driver) => {
+    const current = teams.get(driver.teamName) ?? {
+      teamName: driver.teamName,
+      teamColor: driver.teamColor,
+      points: 0,
+      drivers: [],
+    };
+
+    current.points += driver.points;
+    current.drivers.push(driver.abbreviation);
+    teams.set(driver.teamName, current);
+  });
+
+  return Array.from(teams.values()).sort((a, b) => b.points - a.points);
+}
+
+async function fetchActivitySurface(drivers: DriverInsight[], raceLabel: string) {
+  const [editorial, reddit, x] = await Promise.all([
+    fetchEditorialActivity(drivers),
+    fetchRedditActivity(drivers),
+    fetchXActivity(drivers, raceLabel),
+  ]);
+
+  const items = dedupeActivityItems([
+    ...editorial.items,
+    ...reddit.items,
+    ...x.items,
+  ]).slice(0, 18);
+  const sourcePulse = [...editorial.pulse, reddit.pulse, x.pulse];
+
+  if (items.length) {
+    return { items, sourcePulse };
+  }
+
+  return {
+    items: buildFallbackActivity(drivers, raceLabel),
+    sourcePulse: [
+      ...sourcePulse,
+      {
+        source: "fallback" as const,
+        label: "Product model",
+        status: "fallback" as const,
+        count: 2,
+        updatedAt: new Date().toISOString(),
+        note: "Fallback activity keeps the newsroom usable when external feeds fail.",
+      },
+    ],
+  };
+}
+
+function buildUpgradeSignals(
+  activityItems: ActivityItem[],
+  drivers: DriverInsight[],
+): UpgradeSignal[] {
+  const teams = buildConstructorContext(drivers);
+  const upgradeItems = activityItems.filter((item) => item.category === "upgrade");
+
+  const signals = teams.slice(0, 6).flatMap<UpgradeSignal>((team, index) => {
+    const related = upgradeItems.filter((item) => {
+      const text = `${item.title} ${item.summary}`.toLowerCase();
+      return (
+        text.includes(team.teamName.toLowerCase()) ||
+        team.drivers.some((driver) => item.tags.includes(driver))
+      );
+    });
+
+    if (!related.length && index > 2) {
+      return [];
+    }
+
+    const confidence = related.length
+      ? Math.min(94, 58 + related.reduce((sum, item) => sum + item.signalScore, 0) / related.length / 2)
+      : Math.max(42, 68 - index * 6);
+
+    return {
+      id: `upgrade-${team.teamName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      teamName: team.teamName,
+      teamColor: team.teamColor,
+      package: related[0]?.title.match(/\b(floor|wing|sidepod|aero|package|upgrade)\b/i)?.[0]
+        ? `${related[0].title.match(/\b(floor|wing|sidepod|aero|package|upgrade)\b/i)?.[0]} focus`
+        : index === 0
+          ? "Front-end balance watch"
+          : index === 1
+            ? "Low-drag trim watch"
+            : "Race package watch",
+      impact: confidence >= 76 ? "high" : confidence >= 58 ? "medium" : "low",
+      confidence: Math.round(confidence),
+      evidence: related[0]?.summary || related[0]?.title || "Derived from standings pressure and recent pace context.",
+      relatedItemIds: related.slice(0, 3).map((item) => item.id),
+    };
+  });
+
+  return signals.slice(0, 4);
+}
+
+function buildTimingDeltas(drivers: DriverInsight[]): TimingDelta[] {
+  const driversWithLap = drivers.filter((driver) => typeof driver.avgLap === "number");
+  const bestLap = driversWithLap.length
+    ? Math.min(...driversWithLap.map((driver) => driver.avgLap ?? Number.POSITIVE_INFINITY))
+    : null;
+
+  return drivers.slice(0, 8).map((driver) => {
+    const sectorPairs: Array<["S1" | "S2" | "S3", number | null]> = [
+      ["S1" as const, driver.sectorAverages.sector1],
+      ["S2" as const, driver.sectorAverages.sector2],
+      ["S3" as const, driver.sectorAverages.sector3],
+    ];
+    const slowestSector = sectorPairs
+      .filter((entry): entry is ["S1" | "S2" | "S3", number] => typeof entry[1] === "number")
+      .sort((a, b) => b[1] - a[1])[0];
+    const deltaToBest =
+      typeof driver.avgLap === "number" && bestLap !== null
+        ? Number((driver.avgLap - bestLap).toFixed(3))
+        : null;
+
+    return {
+      driverId: driver.id,
+      driverLabel: driver.abbreviation,
+      teamColor: driver.teamColor,
+      avgLap: driver.avgLap,
+      deltaToBest,
+      sectorFocus: slowestSector?.[0] ?? "race pace",
+      note:
+        deltaToBest === null
+          ? "No comparable lap sample yet"
+          : deltaToBest <= 0.05
+            ? "Benchmark window"
+            : deltaToBest <= 0.45
+              ? "Within setup range"
+              : "Needs stint read",
+    };
+  });
+}
+
+function buildRaceIntelligence(
+  activityItems: ActivityItem[],
+  sourcePulse: SourcePulse[],
+  drivers: DriverInsight[],
+  raceLabel: string,
+): DashboardData["raceIntelligence"] {
+  const upgradeSignals = buildUpgradeSignals(activityItems, drivers);
+  const timingDeltas = buildTimingDeltas(drivers);
+  const leadSignal = upgradeSignals[0];
+  const hotTiming = timingDeltas.find((delta) => delta.deltaToBest !== null);
+
+  return {
+    raceLabel,
+    headline: leadSignal
+      ? `${leadSignal.teamName} ${leadSignal.package.toLowerCase()} leads the upgrade board`
+      : hotTiming
+        ? `${hotTiming.driverLabel} anchors the current timing read`
+        : `${raceLabel} intelligence is building from the live feed`,
+    upgradeSignals,
+    timingDeltas,
+    sourcePulse,
+  };
+}
+
 export async function getDashboardData(): Promise<DashboardData> {
   const now = new Date();
   const season = now.getUTCFullYear();
@@ -779,10 +1512,24 @@ export async function getDashboardData(): Promise<DashboardData> {
   }
 
   const telemetryInsights = buildTelemetryInsights(telemetrySamples);
-  const fantasy = await fetchFantasyBoard(driverInsights);
   const trackCars = buildTrackCars(positions, driverInsights);
   const mapCircuitName =
     nextSession?.circuit_short_name ?? telemetrySession?.circuitName ?? "Live Circuit";
+  const raceLabel = nextSession
+    ? `${nextSession.circuit_short_name} ${nextSession.session_name}`
+    : telemetrySession
+      ? `${telemetrySession.circuitName} review`
+      : `${season} season`;
+  const [fantasy, activity] = await Promise.all([
+    fetchFantasyBoard(driverInsights),
+    fetchActivitySurface(driverInsights, raceLabel),
+  ]);
+  const raceIntelligence = buildRaceIntelligence(
+    activity.items,
+    activity.sourcePulse,
+    driverInsights,
+    raceLabel,
+  );
 
   return {
     generatedAt,
@@ -839,7 +1586,29 @@ export async function getDashboardData(): Promise<DashboardData> {
         updatedAt: generatedAt,
         note: fantasy.note,
       },
+      activity: {
+        label: "Activity",
+        source: "Motorsport.com, The Race, Reddit, X",
+        status: activity.items.some((item) => item.source !== "fallback")
+          ? "cached"
+          : "fallback",
+        updatedAt: activity.items.length ? generatedAt : null,
+        note: activity.items.some((item) => item.source !== "fallback")
+          ? "Editorial and social feeds are normalized into a single activity rail."
+          : "External activity feeds were unavailable, so modeled race notes are displayed.",
+      },
+      raceIntel: {
+        label: "Race intel",
+        source: "Activity feeds + OpenF1 timing model",
+        status: raceIntelligence.timingDeltas.length || raceIntelligence.upgradeSignals.length
+          ? "cached"
+          : "empty",
+        updatedAt: generatedAt,
+        note: "Upgrade and timing cards are generated from source mentions, standings pressure, and lap data.",
+      },
     },
+    activity,
+    raceIntelligence,
     fantasy,
   };
 }
