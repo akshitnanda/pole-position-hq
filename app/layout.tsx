@@ -15,12 +15,14 @@ export const metadata: Metadata = {
     template: "%s | Pole Position HQ",
   },
   description:
-    "A premium Formula 1 command center with live-feeling telemetry, timing context, fantasy trends, and a broadcast-inspired command surface.",
+    "A premium Formula 1 command center with telemetry, timing, news activity, race intelligence, fantasy trends, and a broadcast-inspired command surface.",
   applicationName: "Pole Position HQ",
   keywords: [
     "Formula 1",
     "F1 dashboard",
     "OpenF1",
+    "F1 news",
+    "race intelligence",
     "telemetry",
     "Next.js",
     "portfolio",
@@ -28,7 +30,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Pole Position HQ",
     description:
-      "Track the next session, scrub telemetry, and explore a premium F1 command center built for a stable live demo.",
+      "Track the next session, scrub telemetry, monitor F1 news activity, and explore race intelligence in a premium command center.",
     type: "website",
     images: ["/opengraph-image"],
   },
@@ -36,7 +38,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Pole Position HQ",
     description:
-      "A polished F1 command center with live-feeling telemetry, timing context, and fantasy signals.",
+      "A polished F1 command center with telemetry, timing context, news activity, race intelligence, and fantasy signals.",
     images: ["/twitter-image"],
   },
 };

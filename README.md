@@ -10,6 +10,8 @@ Live demo: https://polehq.vercel.app
 - OpenF1-backed session schedule, standings context, and fastest-lap telemetry
 - F1 GraphQL standings enrichment for driver context and historical stats
 - Official F1 Fantasy API integration with graceful fallback heuristics
+- Motorsport.com, The Race, Reddit, and optional X activity feeds
+- Race intelligence workspace for upgrade signals, timing deltas, and source confidence
 - Scrub-linked telemetry and broadcast-style circuit map synchronization
 - Local-only saved preferences for selected driver and watchlist
 - Public-demo resilience with cached snapshots, fallback states, and source badges
@@ -58,6 +60,12 @@ All environment variables are optional in v1.
   Override for the F1 GraphQL endpoint.
 - `F1_FANTASY_API_BASE_URL`
   Override for the official fantasy API base URL.
+- `MOTORSPORT_RSS_URL`
+  Override for the Motorsport.com F1 RSS feed.
+- `THE_RACE_RSS_URL`
+  Override for The Race activity source. Defaults to the public Formula 1 category page and normalizes readable article links when an RSS feed is not exposed.
+- `X_BEARER_TOKEN`
+  Optional X API bearer token for recent-search activity around F1 race, upgrade, and timing terms.
 
 ## Quality checks
 
@@ -105,6 +113,8 @@ Pole Position HQ is optimized as a stable live demo, not a fragile ultra-realtim
 - The page hydrates from a server snapshot
 - Client refreshes happen on an interval and when visibility returns
 - Telemetry and schedule data are short-cache snapshots
+- Newsroom activity uses public editorial/community feeds, with X enabled only when a bearer token is configured
+- Race intelligence cards combine activity mentions with OpenF1 timing and standings-derived heuristics
 - Fantasy data falls back gracefully when official endpoints are unavailable
 - The UI explicitly shows whether a section is live, cached, fallback, or empty
 
