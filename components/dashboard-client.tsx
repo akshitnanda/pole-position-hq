@@ -9,12 +9,15 @@ import {
   Flag,
   Gauge,
   Map as MapIcon,
+  MessageCircle,
+  Newspaper,
   Radio,
   RefreshCw,
   Sparkles,
   TrendingUp,
   Trophy,
   Users,
+  Wrench,
 } from "lucide-react";
 import {
   useEffect,
@@ -32,7 +35,15 @@ import { DashboardData, DriverInsight, SessionSummary } from "@/lib/types";
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
-type DashboardTab = "overview" | "timing" | "telemetry" | "stats" | "weekend" | "fantasy";
+type DashboardTab =
+  | "overview"
+  | "newsroom"
+  | "race-intel"
+  | "timing"
+  | "telemetry"
+  | "stats"
+  | "weekend"
+  | "fantasy";
 
 const DASHBOARD_TABS: Array<{
   id: DashboardTab;
@@ -43,6 +54,16 @@ const DASHBOARD_TABS: Array<{
     id: "overview",
     label: "Overview",
     description: "Race control",
+  },
+  {
+    id: "newsroom",
+    label: "Newsroom",
+    description: "Feeds",
+  },
+  {
+    id: "race-intel",
+    label: "Race Intel",
+    description: "Upgrades",
   },
   {
     id: "timing",
@@ -567,6 +588,79 @@ function formatLapTime(value: number | null) {
   const minutes = Math.floor(value / 60);
   const seconds = value - minutes * 60;
   return `${minutes}:${seconds.toFixed(3).padStart(6, "0")}`;
+}
+
+function formatDelta(value: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "--";
+  }
+
+  if (Math.abs(value) < 0.001) {
+    return "+0.000";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(3)}`;
+}
+
+function formatActivityTime(value: string | null) {
+  if (!value) {
+    return "monitoring";
+  }
+
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return "monitoring";
+  }
+
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 60) {
+    return `${Math.max(1, minutes)}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) {
+    return `${hours}h`;
+  }
+
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
+    new Date(value),
+  );
+}
+
+function getCategoryTone(category: DashboardData["activity"]["items"][number]["category"]) {
+  if (category === "upgrade") {
+    return { label: "Upgrade", className: "bg-[#8f49ff]/10 text-[#6d36c9] border-[#8f49ff]/20" };
+  }
+
+  if (category === "timing") {
+    return { label: "Timing", className: "bg-[#0066cc]/10 text-[#0056ad] border-[#0066cc]/20" };
+  }
+
+  if (category === "strategy") {
+    return { label: "Strategy", className: "bg-[#00a76f]/10 text-[#007a55] border-[#00a76f]/20" };
+  }
+
+  if (category === "breaking") {
+    return { label: "Breaking", className: "bg-[#e10600]/10 text-[#c40000] border-[#e10600]/20" };
+  }
+
+  if (category === "business") {
+    return { label: "Business", className: "bg-[#d5a125]/12 text-[#8c6500] border-[#d5a125]/24" };
+  }
+
+  return { label: "Community", className: "bg-black/5 text-[var(--muted)] border-black/10" };
+}
+
+function getImpactTone(impact: DashboardData["raceIntelligence"]["upgradeSignals"][number]["impact"]) {
+  if (impact === "high") {
+    return "bg-[#e10600]/10 text-[#c40000] border-[#e10600]/20";
+  }
+
+  if (impact === "medium") {
+    return "bg-[#d5a125]/12 text-[#8c6500] border-[#d5a125]/24";
+  }
+
+  return "bg-black/5 text-[var(--muted)] border-black/10";
 }
 
 function buildConstructorStandings(drivers: DriverInsight[]) {
@@ -2172,7 +2266,7 @@ function DashboardTabs({
   return (
     <div className="glass-panel rounded-[18px] p-2">
       <div
-        className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-6"
+        className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-8"
         role="tablist"
         aria-label="Dashboard sections"
       >
@@ -2431,6 +2525,287 @@ function StatsPanel({
   );
 }
 
+function NewsroomPanel({
+  activity,
+}: {
+  activity: DashboardData["activity"];
+}) {
+  const leadItem = activity.items[0] ?? null;
+  const secondaryItems = activity.items.slice(1, 7);
+  const liveSources = activity.sourcePulse.filter((source) => source.status === "live").length;
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Newsroom</div>
+            <FunBadge label={`${activity.items.length} signals`} tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            Activity around the paddock
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Motorsport.com, The Race, Reddit, and X folded into one source-aware activity board.
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatChip label="Sources" value={`${activity.sourcePulse.length}`} />
+          <StatChip label="Live" value={`${liveSources}`} />
+          <StatChip label="Top signal" value={leadItem ? `${leadItem.signalScore}` : "--"} />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,0.96fr)_minmax(300px,0.54fr)]">
+        <div className="grid gap-3">
+          {leadItem ? (
+            <a
+              href={leadItem.url}
+              target="_blank"
+              rel="noreferrer"
+              className={`minimal-card group relative min-h-[260px] overflow-hidden rounded-[20px] p-4 transition hover:-translate-y-0.5 sm:rounded-[22px] sm:p-5 ${FOCUS_RING}`}
+            >
+              <div className="absolute inset-x-0 top-0 h-1 bg-[var(--team-accent)]" />
+              <div className="absolute right-3 top-3 flex items-center gap-2">
+                <span className="telemetry-text rounded-full border border-white/60 bg-white/82 px-2.5 py-1 text-[10px] font-semibold text-[var(--foreground)] shadow-sm">
+                  {leadItem.signalScore}
+                </span>
+                <span className="rounded-full border border-white/60 bg-white/82 p-2 shadow-sm">
+                  <ArrowUpRight size={14} />
+                </span>
+              </div>
+              <div className="pr-20">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${getCategoryTone(leadItem.category).className}`}>
+                    {getCategoryTone(leadItem.category).label}
+                  </span>
+                  <span className="rounded-full border border-black/8 bg-white/72 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+                    {leadItem.sourceLabel}
+                  </span>
+                </div>
+                <div className="section-title mt-5 text-[1.65rem] font-semibold leading-[1.02] sm:text-[2.25rem]">
+                  {leadItem.title}
+                </div>
+                <div className="mt-3 max-w-3xl text-sm leading-6 text-[var(--muted)]">
+                  {leadItem.summary || "Source activity is being monitored for more context."}
+                </div>
+              </div>
+              <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-center justify-between gap-2 border-t border-black/8 pt-3 text-xs text-[var(--muted)]">
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock3 size={13} />
+                  {formatActivityTime(leadItem.publishedAt)}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <MessageCircle size={13} />
+                  {leadItem.engagementLabel}
+                </span>
+              </div>
+            </a>
+          ) : (
+            <div className="minimal-card rounded-[20px] p-5 text-sm text-[var(--muted)] sm:rounded-[22px]">
+              Activity feeds are standing by.
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {secondaryItems.map((item) => {
+              const tone = getCategoryTone(item.category);
+
+              return (
+                <a
+                  key={item.id}
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`minimal-card group relative overflow-hidden rounded-[18px] p-4 transition hover:-translate-y-0.5 ${FOCUS_RING}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${tone.className}`}>
+                        {tone.label}
+                      </span>
+                      <span className="text-[11px] text-[var(--muted)]">
+                        {item.sourceLabel}
+                      </span>
+                    </div>
+                    <span className="telemetry-text rounded-full bg-black/5 px-2 py-1 text-[10px] font-semibold">
+                      {item.signalScore}
+                    </span>
+                  </div>
+                  <div className="mt-3 line-clamp-3 text-sm font-semibold leading-5 text-[var(--foreground)]">
+                    {item.title}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {item.tags.slice(0, 3).map((tag) => (
+                      <span
+                        key={`${item.id}-${tag}`}
+                        className="rounded-full border border-black/6 bg-white/70 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-4 content-start">
+          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <div className="eyebrow">Source pulse</div>
+                <div className="section-title mt-2 text-base font-semibold">Feed health</div>
+              </div>
+              <Newspaper size={16} className="text-[var(--muted)]" />
+            </div>
+            <div className="grid gap-2">
+              {activity.sourcePulse.map((source) => {
+                const tone = getFeedTone(source.status);
+
+                return (
+                  <div
+                    key={source.source}
+                    className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-[var(--foreground)]">
+                        {source.label}
+                      </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.className}`}>
+                        {source.count}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--muted)]">
+                      {tone.label} / {source.note ?? "Monitoring"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function RaceIntelPanel({
+  intel,
+}: {
+  intel: DashboardData["raceIntelligence"];
+}) {
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Race Intel</div>
+            <FunBadge label={intel.raceLabel} tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            {intel.headline}
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            Upgrade mentions, timing deltas, and source confidence converted into a usable weekend read.
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatChip label="Upgrades" value={`${intel.upgradeSignals.length}`} />
+          <StatChip label="Timing" value={`${intel.timingDeltas.length}`} />
+          <StatChip
+            label="Confidence"
+            value={intel.upgradeSignals[0] ? `${intel.upgradeSignals[0].confidence}%` : "--"}
+            accent={intel.upgradeSignals[0]?.teamColor}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1fr)]">
+        <div className="grid gap-3">
+          {intel.upgradeSignals.map((signal) => (
+            <div
+              key={signal.id}
+              className="minimal-card team-tint relative overflow-hidden rounded-[20px] p-4 sm:rounded-[22px]"
+              style={{ ["--team-tint" as string]: rgba(signal.teamColor, 0.1) }}
+            >
+              <div className="absolute right-3 top-3 flex items-center gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${getImpactTone(signal.impact)}`}>
+                  {signal.impact}
+                </span>
+                <span
+                  className="telemetry-text rounded-full px-2.5 py-1 text-[10px] font-semibold"
+                  style={{ background: rgba(signal.teamColor, 0.13), color: `#${signal.teamColor}` }}
+                >
+                  {signal.confidence}%
+                </span>
+              </div>
+              <div className="pr-24">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-[12px] bg-white/72 p-2">
+                    <Wrench size={15} />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                      {signal.teamName}
+                    </div>
+                    <div className="text-xs text-[var(--muted)]">{signal.package}</div>
+                  </div>
+                </div>
+                <div className="mt-4 text-sm leading-6 text-[var(--muted)]">
+                  {signal.evidence}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Timing deltas</div>
+              <div className="section-title mt-2 text-base font-semibold">Race-specific read</div>
+            </div>
+            <Gauge size={16} className="text-[var(--muted)]" />
+          </div>
+          <div className="grid gap-2">
+            {intel.timingDeltas.map((delta, index) => (
+              <div
+                key={delta.driverId}
+                className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3"
+              >
+                <span
+                  className="telemetry-text rounded-full px-2.5 py-1 text-center text-[11px] font-semibold"
+                  style={{ background: rgba(delta.teamColor, 0.12), color: `#${delta.teamColor}` }}
+                >
+                  {delta.driverLabel}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                      {formatDelta(delta.deltaToBest)}
+                    </span>
+                    <span className="rounded-full bg-black/5 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                      {delta.sectorFocus}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-[var(--muted)]">
+                    {delta.note} / avg {formatLapTime(delta.avgLap)}
+                  </div>
+                </div>
+                <span className="telemetry-text text-xs text-[var(--muted)]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 function WeekendInfoPanel({
   dashboard,
 }: {
@@ -2440,6 +2815,8 @@ function WeekendInfoPanel({
     dashboard.sources.schedule,
     dashboard.sources.telemetry,
     dashboard.sources.fantasy,
+    dashboard.sources.activity,
+    dashboard.sources.raceIntel,
   ];
   const nextSession = dashboard.nextSession;
 
@@ -2871,6 +3248,14 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         </div>
       ) : null}
 
+      {activeTab === "newsroom" ? (
+        <NewsroomPanel activity={data.activity} />
+      ) : null}
+
+      {activeTab === "race-intel" ? (
+        <RaceIntelPanel intel={data.raceIntelligence} />
+      ) : null}
+
       {activeTab === "timing" ? (
         <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
           <TimingBoardPanel
@@ -2964,7 +3349,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           Local prefs saved on this device
         </span>
         <span className="glass-pill rounded-full px-3 py-1.5">
-          OpenF1, F1 GraphQL, Official Fantasy
+          OpenF1, F1 GraphQL, Motorsport, The Race, Reddit, X-ready
         </span>
       </footer>
     </main>

@@ -90,6 +90,60 @@ export type FantasyEntry = {
   points: number;
 };
 
+export type ActivitySource = "motorsport" | "the-race" | "x" | "reddit" | "fallback";
+
+export type ActivityItem = {
+  id: string;
+  source: ActivitySource;
+  sourceLabel: string;
+  title: string;
+  url: string;
+  publishedAt: string | null;
+  summary: string;
+  category: "breaking" | "upgrade" | "timing" | "strategy" | "community" | "business";
+  signalScore: number;
+  engagementLabel: string;
+  tags: string[];
+};
+
+export type SourcePulse = {
+  source: ActivitySource;
+  label: string;
+  status: DataFeedStatus;
+  count: number;
+  updatedAt: string | null;
+  note?: string | null;
+};
+
+export type UpgradeSignal = {
+  id: string;
+  teamName: string;
+  teamColor: string;
+  package: string;
+  impact: "high" | "medium" | "low";
+  confidence: number;
+  evidence: string;
+  relatedItemIds: string[];
+};
+
+export type TimingDelta = {
+  driverId: string;
+  driverLabel: string;
+  teamColor: string;
+  avgLap: number | null;
+  deltaToBest: number | null;
+  sectorFocus: "S1" | "S2" | "S3" | "race pace";
+  note: string;
+};
+
+export type RaceIntelligence = {
+  headline: string;
+  raceLabel: string;
+  upgradeSignals: UpgradeSignal[];
+  timingDeltas: TimingDelta[];
+  sourcePulse: SourcePulse[];
+};
+
 export type DataFeedStatus = "live" | "cached" | "fallback" | "empty";
 
 export type DashboardFeedMeta = {
@@ -120,7 +174,14 @@ export type DashboardData = {
     schedule: DashboardFeedMeta;
     telemetry: DashboardFeedMeta;
     fantasy: DashboardFeedMeta;
+    activity: DashboardFeedMeta;
+    raceIntel: DashboardFeedMeta;
   };
+  activity: {
+    items: ActivityItem[];
+    sourcePulse: SourcePulse[];
+  };
+  raceIntelligence: RaceIntelligence;
   fantasy: {
     source: "official" | "fallback";
     note: string;
