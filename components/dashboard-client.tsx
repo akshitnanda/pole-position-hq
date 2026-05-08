@@ -5,9 +5,11 @@ import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
+  CalendarDays,
   Clock3,
   Flag,
   Gauge,
+  ListOrdered,
   Map as MapIcon,
   MessageCircle,
   Newspaper,
@@ -18,6 +20,7 @@ import {
   Trophy,
   Users,
   Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import {
   useEffect,
@@ -49,46 +52,55 @@ const DASHBOARD_TABS: Array<{
   id: DashboardTab;
   label: string;
   description: string;
+  icon: LucideIcon;
 }> = [
   {
     id: "overview",
     label: "Overview",
     description: "Race control",
+    icon: Sparkles,
   },
   {
     id: "newsroom",
     label: "Newsroom",
     description: "Feeds",
+    icon: Newspaper,
   },
   {
     id: "race-intel",
     label: "Race Intel",
     description: "Upgrades",
+    icon: Wrench,
   },
   {
     id: "timing",
     label: "Timing",
     description: "Field order",
+    icon: ListOrdered,
   },
   {
     id: "telemetry",
     label: "Telemetry",
     description: "Trace lab",
+    icon: Radio,
   },
   {
     id: "stats",
     label: "Stats",
     description: "Standings",
+    icon: Activity,
   },
   {
     id: "weekend",
     label: "Weekend",
     description: "Info",
+    icon: CalendarDays,
   },
   {
     id: "fantasy",
     label: "Fantasy",
     description: "Market",
+    icon: TrendingUp,
   },
 ];
 
@@ -661,6 +673,130 @@ function getImpactTone(impact: DashboardData["raceIntelligence"]["upgradeSignals
   }
 
   return "bg-black/5 text-[var(--muted)] border-black/10";
+}
+
+function BriefingAction({
+  icon,
+  eyebrow,
+  title,
+  meta,
+  accent,
+  onClick,
+}: {
+  icon: ReactNode;
+  eyebrow: string;
+  title: string;
+  meta: string;
+  accent?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`minimal-card group grid min-h-[132px] grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[18px] p-3 text-left transition hover:-translate-y-0.5 sm:min-h-[144px] sm:p-4 ${FOCUS_RING}`}
+      style={
+        accent
+          ? {
+              background: `linear-gradient(135deg, ${rgba(accent, 0.13)}, rgba(255,255,255,0.72) 62%)`,
+              borderColor: rgba(accent, 0.24),
+            }
+          : undefined
+      }
+    >
+      <span
+        className="grid h-9 w-9 place-items-center rounded-[14px] border border-black/6 bg-white/76 text-[var(--foreground)]"
+        style={accent ? { color: `#${accent}` } : undefined}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="eyebrow block">{eyebrow}</span>
+        <span className="mt-2 line-clamp-2 block text-sm font-semibold leading-5 text-[var(--foreground)] sm:text-[15px]">
+          {title}
+        </span>
+        <span className="mt-2 block truncate text-xs text-[var(--muted)]">{meta}</span>
+      </span>
+      <span className="rounded-full border border-black/6 bg-white/78 p-2 text-[var(--muted)] transition group-hover:text-[var(--foreground)]">
+        <ArrowUpRight size={14} />
+      </span>
+    </button>
+  );
+}
+
+function BriefingPanel({
+  dashboard,
+  selectedDriver,
+  onNavigate,
+}: {
+  dashboard: DashboardData;
+  selectedDriver: DriverInsight | null;
+  onNavigate: (tab: DashboardTab) => void;
+}) {
+  const topActivity = dashboard.activity.items[0] ?? null;
+  const topUpgrade = dashboard.raceIntelligence.upgradeSignals[0] ?? null;
+  const topDelta = dashboard.raceIntelligence.timingDeltas.find(
+    (delta) => delta.deltaToBest !== null,
+  );
+  const sourceCount = dashboard.activity.sourcePulse.filter(
+    (source) => source.status === "live" || source.status === "cached",
+  ).length;
+
+  return (
+    <Panel className="p-3 sm:p-4" tint="var(--team-accent-wash)">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div>
+          <div className="eyebrow">Command brief</div>
+          <div className="section-title mt-1 text-lg font-semibold sm:text-2xl">
+            Priority stack
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          <span className="glass-pill telemetry-text rounded-full px-2.5 py-1.5 text-center text-[10px] font-semibold text-[var(--foreground)]">
+            {dashboard.activity.items.length} signals
+          </span>
+          <span className="glass-pill telemetry-text rounded-full px-2.5 py-1.5 text-center text-[10px] font-semibold text-[var(--foreground)]">
+            {sourceCount} feeds
+          </span>
+          <span className="glass-pill telemetry-text rounded-full px-2.5 py-1.5 text-center text-[10px] font-semibold text-[var(--foreground)]">
+            {dashboard.raceIntelligence.timingDeltas.length} deltas
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2.5 md:grid-cols-3">
+        <BriefingAction
+          icon={<Newspaper size={16} />}
+          eyebrow="News pulse"
+          title={topActivity?.title ?? "Activity feeds are standing by"}
+          meta={topActivity ? `${topActivity.sourceLabel} / ${topActivity.signalScore} signal` : "No readable feed item yet"}
+          onClick={() => onNavigate("newsroom")}
+        />
+        <BriefingAction
+          icon={<Wrench size={16} />}
+          eyebrow="Upgrade watch"
+          title={topUpgrade ? `${topUpgrade.teamName}: ${topUpgrade.package}` : "Upgrade model warming up"}
+          meta={topUpgrade ? `${topUpgrade.impact} impact / ${topUpgrade.confidence}% confidence` : dashboard.raceIntelligence.raceLabel}
+          accent={topUpgrade?.teamColor}
+          onClick={() => onNavigate("race-intel")}
+        />
+        <BriefingAction
+          icon={<Gauge size={16} />}
+          eyebrow="Timing read"
+          title={
+            topDelta
+              ? `${topDelta.driverLabel} ${formatDelta(topDelta.deltaToBest)} through ${topDelta.sectorFocus}`
+              : selectedDriver
+                ? `${selectedDriver.abbreviation} pace profile`
+                : "Timing deltas pending"
+          }
+          meta={topDelta ? topDelta.note : "Select a driver for a deeper read"}
+          accent={topDelta?.teamColor ?? selectedDriver?.teamColor}
+          onClick={() => onNavigate("timing")}
+        />
+      </div>
+    </Panel>
+  );
 }
 
 function buildConstructorStandings(drivers: DriverInsight[]) {
@@ -2264,14 +2400,15 @@ function DashboardTabs({
   onChange: (tab: DashboardTab) => void;
 }) {
   return (
-    <div className="glass-panel rounded-[18px] p-2">
+    <div className="glass-panel sticky top-2 z-30 rounded-[18px] p-1.5 shadow-[0_18px_36px_rgba(17,21,29,0.09)] sm:p-2">
       <div
-        className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-8"
+        className="flex gap-1 overflow-x-auto hide-scrollbar sm:grid sm:grid-cols-4 lg:grid-cols-8"
         role="tablist"
         aria-label="Dashboard sections"
       >
         {DASHBOARD_TABS.map((tab) => {
           const active = activeTab === tab.id;
+          const Icon = tab.icon;
 
           return (
             <button
@@ -2280,19 +2417,24 @@ function DashboardTabs({
               role="tab"
               aria-selected={active}
               onClick={() => onChange(tab.id)}
-              className={`rounded-[12px] px-3 py-2.5 text-left transition ${FOCUS_RING} ${
+              className={`grid min-w-[132px] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[12px] px-3 py-2.5 text-left transition sm:min-w-0 ${FOCUS_RING} ${
                 active
                   ? "bg-[var(--team-accent)] text-white shadow-[0_10px_20px_rgba(17,21,29,0.12)]"
                   : "text-[var(--muted)] hover:bg-white/68 hover:text-[var(--foreground)]"
               }`}
             >
-              <span className="block text-sm font-semibold leading-tight">{tab.label}</span>
-              <span
-                className={`mt-0.5 block text-[10px] uppercase tracking-[0.14em] ${
-                  active ? "text-white/72" : "text-[var(--muted)]"
-                }`}
-              >
-                {tab.description}
+              <Icon size={16} aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold leading-tight">
+                  {tab.label}
+                </span>
+                <span
+                  className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.14em] ${
+                    active ? "text-white/72" : "text-[var(--muted)]"
+                  }`}
+                >
+                  {tab.description}
+                </span>
               </span>
             </button>
           );
@@ -3204,47 +3346,55 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {activeTab === "overview" ? (
-        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-          <div className="grid gap-4 sm:gap-5">
-            <TelemetryExperiencePanel
-              accent={accent}
-              driverLabel={data.telemetryDriverLabel}
+        <div className="grid gap-4 sm:gap-5">
+          <BriefingPanel
+            dashboard={data}
+            selectedDriver={selectedDriver}
+            onNavigate={setActiveTab}
+          />
+
+          <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+            <div className="grid gap-4 sm:gap-5">
+              <TelemetryExperiencePanel
+                accent={accent}
+                driverLabel={data.telemetryDriverLabel}
+                insights={data.telemetryInsights}
+                sourceMeta={data.sources.telemetry}
+                samples={data.telemetrySamples}
+                session={data.telemetrySession}
+                scrubIndex={effectiveScrubIndex}
+                onScrub={(index) =>
+                  setScrubIndex(
+                    index === null
+                      ? Math.max(0, data.telemetrySamples.length - 1)
+                      : index,
+                  )
+                }
+              />
+
+              <PerformanceProfilePanel driver={selectedDriver} />
+
+              <FantasyActionPanel
+                fantasy={data.fantasy}
+                sourceMeta={data.sources.fantasy}
+                watchlist={watchlist}
+                onToggleWatch={toggleWatch}
+              />
+            </div>
+
+            <LiveActionDock
+              circuitName={data.trackMap.circuitName}
+              layoutKey={data.trackMap.layoutKey}
+              cars={data.trackMap.cars}
+              selectedDriver={selectedDriver}
               insights={data.telemetryInsights}
-              sourceMeta={data.sources.telemetry}
-              samples={data.telemetrySamples}
-              session={data.telemetrySession}
+              telemetrySamples={data.telemetrySamples}
               scrubIndex={effectiveScrubIndex}
-              onScrub={(index) =>
-                setScrubIndex(
-                  index === null
-                    ? Math.max(0, data.telemetrySamples.length - 1)
-                    : index,
-                )
-              }
-            />
-
-            <PerformanceProfilePanel driver={selectedDriver} />
-
-            <FantasyActionPanel
-              fantasy={data.fantasy}
-              sourceMeta={data.sources.fantasy}
-              watchlist={watchlist}
-              onToggleWatch={toggleWatch}
+              drivers={data.standings}
+              selectedDriverId={effectiveSelectedDriverId}
+              onSelect={setSelectedDriverId}
             />
           </div>
-
-          <LiveActionDock
-            circuitName={data.trackMap.circuitName}
-            layoutKey={data.trackMap.layoutKey}
-            cars={data.trackMap.cars}
-            selectedDriver={selectedDriver}
-            insights={data.telemetryInsights}
-            telemetrySamples={data.telemetrySamples}
-            scrubIndex={effectiveScrubIndex}
-            drivers={data.standings}
-            selectedDriverId={effectiveSelectedDriverId}
-            onSelect={setSelectedDriverId}
-          />
         </div>
       ) : null}
 
