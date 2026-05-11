@@ -13,6 +13,34 @@
   --shadow: 0 28px 70px rgba(17, 21, 29, 0.1);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #0d1118;
+    --foreground: #f6f8fb;
+    --panel: rgba(20, 25, 34, 0.78);
+    --panel-strong: rgba(28, 34, 45, 0.92);
+    --muted: rgba(210, 218, 230, 0.7);
+    --line: rgba(255, 255, 255, 0.1);
+    --track: #f5f7fb;
+    --shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: #0d1118;
+  --foreground: #f6f8fb;
+  --panel: rgba(20, 25, 34, 0.78);
+  --panel-strong: rgba(28, 34, 45, 0.92);
+  --muted: rgba(210, 218, 230, 0.7);
+  --line: rgba(255, 255, 255, 0.1);
+  --track: #f5f7fb;
+  --shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -26,7 +54,7 @@
 }
 
 html {
-  color-scheme: light;
+  color-scheme: light dark;
 }
 
 body::before,
@@ -43,6 +71,22 @@ body::before {
     linear-gradient(135deg, rgba(225, 6, 0, 0.08), transparent 32%),
     linear-gradient(225deg, rgba(0, 161, 155, 0.075), transparent 34%),
     linear-gradient(180deg, #f9fafc 0%, #f1f4f8 50%, #e8ecf2 100%);
+}
+
+:root[data-theme="dark"] body::before {
+  background:
+    linear-gradient(135deg, rgba(225, 6, 0, 0.12), transparent 30%),
+    linear-gradient(225deg, rgba(0, 161, 155, 0.1), transparent 32%),
+    linear-gradient(180deg, #111722 0%, #0d1118 56%, #080b10 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body::before {
+    background:
+      linear-gradient(135deg, rgba(225, 6, 0, 0.12), transparent 30%),
+      linear-gradient(225deg, rgba(0, 161, 155, 0.1), transparent 32%),
+      linear-gradient(180deg, #111722 0%, #0d1118 56%, #080b10 100%);
+  }
 }
 
 body::after {
@@ -149,6 +193,36 @@ a {
   box-shadow:
     0 10px 24px rgba(17, 21, 29, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.36);
+}
+
+:root[data-theme="dark"] .glass-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(25, 31, 42, 0.92) 0%,
+    rgba(17, 22, 31, 0.84) 100%
+  );
+}
+
+:root[data-theme="dark"] .glass-pill,
+:root[data-theme="dark"] .minimal-card {
+  background: rgba(23, 29, 39, 0.76);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-panel {
+    background: linear-gradient(
+      180deg,
+      rgba(25, 31, 42, 0.92) 0%,
+      rgba(17, 22, 31, 0.84) 100%
+    );
+  }
+
+  :root:not([data-theme="light"]) .glass-pill,
+  :root:not([data-theme="light"]) .minimal-card {
+    background: rgba(23, 29, 39, 0.76);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .broadcast-map {

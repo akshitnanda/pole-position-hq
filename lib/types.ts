@@ -78,6 +78,7 @@ export type TrackCar = {
   teamColor: string;
   position: number;
   gapLabel: string;
+  trackProgress: number;
 };
 
 export type FantasyEntry = {
@@ -144,6 +145,39 @@ export type RaceIntelligence = {
   sourcePulse: SourcePulse[];
 };
 
+export type RaceControlFlag = "Green" | "Yellow" | "Red" | "VSC" | "SC";
+
+export type RaceControlEvent = {
+  id: string;
+  timestamp: string;
+  type: "flag" | "pit" | "incident" | "overtake" | "system";
+  message: string;
+  driverId?: string | null;
+};
+
+export type RaceControlState = {
+  flag: RaceControlFlag;
+  message: string;
+  countdownEndsAt: string | null;
+  events: RaceControlEvent[];
+};
+
+export type SessionWeather = {
+  sessionKey: number;
+  label: string;
+  temperatureC: number;
+  rainChance: number;
+  summary: string;
+};
+
+export type LiveTimingState = {
+  connection: "websocket" | "eventsource" | "offline";
+  receivedAt: string | null;
+  sampleIndex: number;
+  trackPosition: number;
+  latencyMs: number;
+};
+
 export type DataFeedStatus = "live" | "cached" | "fallback" | "empty";
 
 export type DashboardFeedMeta = {
@@ -182,6 +216,9 @@ export type DashboardData = {
     sourcePulse: SourcePulse[];
   };
   raceIntelligence: RaceIntelligence;
+  raceControl: RaceControlState;
+  weekendWeather: SessionWeather[];
+  liveTiming: LiveTimingState;
   fantasy: {
     source: "official" | "fallback";
     note: string;

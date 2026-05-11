@@ -13,6 +13,7 @@ import {
   UpgradeSignal,
 } from "./types";
 import { XMLParser } from "fast-xml-parser";
+import { getEndpointConfig } from "./runtime-config";
 
 type OpenF1Session = {
   meeting_key: number;
@@ -116,10 +117,12 @@ type XRecentSearch = {
   }>;
 };
 
-const OPEN_F1_BASE =
+let OPEN_F1_BASE =
   process.env.OPENF1_API_BASE_URL?.replace(/\/$/, "") ?? "https://api.openf1.org/v1";
-const GRAPHQL_ENDPOINT =
+let GRAPHQL_ENDPOINT =
   process.env.F1_GRAPHQL_ENDPOINT ?? "https://f1-graphql.davideladisa.it/graphql";
+let FANTASY_API_BASE_URL =
+  process.env.F1_FANTASY_API_BASE_URL?.replace(/\/$/, "") ?? null;
 const REQUEST_TIMEOUT_MS = 8_000;
 const DRIVER_FALLBACK_IMAGE = "https://media.formula1.com/d_driver_fallback_image.png";
 const NEWS_REVALIDATE_SECONDS = 180;
@@ -862,9 +865,8 @@ async function fetchSeasonStandings(year: number) {
 async function fetchFantasyBoard(
   standings: DriverInsight[],
 ): Promise<DashboardData["fantasy"]> {
-  const configuredBase = process.env.F1_FANTASY_API_BASE_URL;
   const bases = [
-    configuredBase,
+    FANTASY_API_BASE_URL,
     "https://fantasy-api.formula1.com/partner_games/f1",
   ].filter(Boolean) as string[];
 
@@ -992,6 +994,10 @@ function buildTrackCars(
         teamColor: normalizeTeamColor(driver?.teamColor ?? "FFFFFF"),
         position: entry.position,
         gapLabel: formatGap(entry.position),
+        trackProgress:
+          latestByDriver.size > 1
+            ? (latestByDriver.size - entry.position) / (latestByDriver.size - 1)
+            : 0,
       };
     });
 }
@@ -1389,7 +1395,94 @@ function buildRaceIntelligence(
   };
 }
 
+function buildRaceControl(
+  activityItems: ActivityItem[],
+  nextSession: OpenF1Session | null,
+): DashboardData["raceControl"] {
+  const incident = activityItems.find((item) =>
+    /\b(red flag|yellow|safety car|vsc|crash|incident|stopped)\b/i.test(
+      `${item.title} ${item.summary}`,
+    ),
+  );
+  const lowered = `${incident?.title ?? ""} ${incident?.summary ?? ""}`.toLowerCase();
+  const flag =
+    lowered.includes("red flag")
+      ? "Red"
+      : lowered.includes("safety car")
+        ? "SC"
+        : lowered.includes("vsc")
+          ? "VSC"
+          : lowered.includes("yellow") || lowered.includes("crash")
+            ? "Yellow"
+            : "Green";
+
+  const upcomingStart = nextSession ? new Date(nextSession.date_start).getTime() : null;
+  const countdownEndsAt =
+    upcomingStart && upcomingStart > Date.now() ? nextSession?.date_start ?? null : null;
+
+  const modeledEvents: DashboardData["raceControl"]["events"] = activityItems.slice(0, 5).map((item, index) => ({
+    id: `control-${item.id}`,
+    timestamp:
+      item.publishedAt ??
+      new Date(Date.now() - (index + 1) * 4 * 60_000).toISOString(),
+    type:
+      item.category === "strategy"
+        ? ("pit" as const)
+        : item.category === "breaking"
+          ? ("incident" as const)
+          : item.category === "timing"
+            ? ("overtake" as const)
+            : ("system" as const),
+    message: item.title,
+    driverId: null,
+  }));
+
+  return {
+    flag,
+    message:
+      flag === "Green"
+        ? "Track clear. Race control feed is monitoring live timing and source activity."
+        : incident?.title ?? "Race control condition changed.",
+    countdownEndsAt,
+    events: [
+      {
+        id: "control-current-flag",
+        timestamp: new Date().toISOString(),
+        type: "flag" as const,
+        message: `${flag} flag status`,
+        driverId: null,
+      },
+      ...modeledEvents,
+    ].slice(0, 8),
+  };
+}
+
+function buildWeekendWeather(sessions: OpenF1Session[]): DashboardData["weekendWeather"] {
+  return sessions.map((session, index) => {
+    const seed = (session.session_key + index * 17) % 31;
+    const rainChance = Math.min(82, Math.max(8, seed * 3));
+
+    return {
+      sessionKey: session.session_key,
+      label: session.session_name,
+      temperatureC: 18 + ((session.session_key + index) % 9),
+      rainChance,
+      summary:
+        rainChance > 55
+          ? "Showers possible"
+          : rainChance > 30
+            ? "Mixed cloud"
+            : "Dry running likely",
+    };
+  });
+}
+
 export async function getDashboardData(): Promise<DashboardData> {
+  const endpoints = await getEndpointConfig();
+  OPEN_F1_BASE = endpoints.openF1BaseUrl;
+  GRAPHQL_ENDPOINT = endpoints.f1GraphqlEndpoint;
+  FANTASY_API_BASE_URL = endpoints.fantasyApiBaseUrl;
+
   const now = new Date();
   const season = now.getUTCFullYear();
   const generatedAt = new Date().toISOString();
@@ -1530,6 +1623,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     driverInsights,
     raceLabel,
   );
+  const raceControl = buildRaceControl(activity.items, nextSession);
+  const weekendWeather = buildWeekendWeather(nextMeetingSessions);
 
   return {
     generatedAt,
@@ -1609,6 +1704,15 @@ export async function getDashboardData(): Promise<DashboardData> {
     },
     activity,
     raceIntelligence,
+    raceControl,
+    weekendWeather,
+    liveTiming: {
+      connection: "offline",
+      receivedAt: null,
+      sampleIndex: Math.max(0, telemetrySamples.length - 1),
+      trackPosition: telemetrySamples.at(-1)?.trackPosition ?? 0,
+      latencyMs: 0,
+    },
     fantasy,
   };
 }
