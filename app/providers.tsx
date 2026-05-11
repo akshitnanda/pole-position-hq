@@ -1,21 +1,11 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Provider } from "react-redux";
 import { ReactNode, useState } from "react";
+import { makeStore } from "@/lib/store";
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60_000,
-            gcTime: 5 * 60_000,
-            refetchOnWindowFocus: false,
-          },
-        },
-      }),
-  );
+  const [store] = useState(() => makeStore());
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return <Provider store={store}>{children}</Provider>;
 }

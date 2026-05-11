@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
 import {
   Activity,
@@ -15,6 +14,7 @@ import {
   Newspaper,
   Radio,
   RefreshCw,
+  SunMoon,
   Sparkles,
   TrendingUp,
   Trophy,
@@ -23,17 +23,35 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  Component,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type ErrorInfo,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
   type TouchEvent,
 } from "react";
-import { DashboardData, DriverInsight, SessionSummary } from "@/lib/types";
+import { DashboardData, DriverInsight, FantasyEntry, SessionSummary } from "@/lib/types";
+import {
+  logDashboardInteraction,
+  markDashboardInteractive,
+} from "@/lib/analytics";
+import { loadLatestDashboardSnapshot, saveDashboardSnapshot } from "@/lib/offline-cache";
+import { useAppDispatch, useAppSelector } from "@/lib/store";
+import { dashboardApi, useGetDashboardQuery } from "@/lib/store/dashboard-api";
+import {
+  cycleThemeMode,
+  hydratePreferences,
+  setActiveTab as setActiveTabAction,
+  setScrubIndex,
+  setSelectedDriverId,
+  setTelemetryPlaying,
+  toggleWatchlist,
+} from "@/lib/store/ui-slice";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
@@ -193,21 +211,9 @@ function useRelativeTime(timestamp: number, initialNow: number) {
 
 function useVisibilityRefresh(refetch: () => Promise<unknown>) {
   useEffect(() => {
-    let timer: number | null = null;
-
     const run = () => {
       if (document.visibilityState === "visible" && navigator.onLine) {
         void refetch();
-      }
-    };
-
-    const start = () => {
-      if (timer !== null) {
-        window.clearInterval(timer);
-      }
-
-      if (document.visibilityState === "visible") {
-        timer = window.setInterval(run, 30_000);
       }
     };
 
@@ -215,20 +221,15 @@ function useVisibilityRefresh(refetch: () => Promise<unknown>) {
       if (document.visibilityState === "visible") {
         run();
       }
-      start();
     };
 
     const handleOnline = () => run();
 
-    start();
     window.addEventListener("focus", handleOnline);
     window.addEventListener("online", handleOnline);
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
-      if (timer !== null) {
-        window.clearInterval(timer);
-      }
       window.removeEventListener("focus", handleOnline);
       window.removeEventListener("online", handleOnline);
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -673,6 +674,117 @@ function getImpactTone(impact: DashboardData["raceIntelligence"]["upgradeSignals
   }
 
   return "bg-black/5 text-[var(--muted)] border-black/10";
+}
+
+type TelemetryWorkerMetrics = {
+  fastestIndex: number;
+  fastestElapsed: number;
+  maxDelta: number;
+  brakeEvents: number;
+  sampledAt: number;
+} | null;
+
+function useTelemetryWorker(samples: DashboardData["telemetrySamples"]) {
+  const [metrics, setMetrics] = useState<TelemetryWorkerMetrics>(null);
+
+  useEffect(() => {
+    if (!samples.length || typeof Worker === "undefined") {
+      const frame = window.requestAnimationFrame(() => setMetrics(null));
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    const worker = new Worker("/telemetry-worker.js");
+    worker.onmessage = (event: MessageEvent<TelemetryWorkerMetrics>) => {
+      setMetrics(event.data);
+    };
+    worker.postMessage({ samples });
+
+    return () => worker.terminate();
+  }, [samples]);
+
+  return metrics;
+}
+
+function buildRadioSnippet(driver: DriverInsight | null) {
+  if (!driver) {
+    return "Awaiting driver channel.";
+  }
+
+  const templates = [
+    `${driver.abbreviation}: balance is coming alive through sector two.`,
+    `${driver.abbreviation}: copy, tyre phase looks stable.`,
+    `${driver.abbreviation}: push window available after the next split.`,
+  ];
+
+  return templates[driver.standingPosition % templates.length];
+}
+
+function buildCalendarLinks(session: SessionSummary) {
+  const start = new Date(session.dateStart);
+  const end = new Date(session.dateEnd);
+  const title = encodeURIComponent(`F1 ${session.sessionName} - ${session.circuitName}`);
+  const details = encodeURIComponent(`${session.location}, ${session.countryName}`);
+  const dates = `${start.toISOString().replace(/[-:]/g, "").replace(".000", "")}/${end
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(".000", "")}`;
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    `DTSTART:${dates.split("/")[0]}`,
+    `DTEND:${dates.split("/")[1]}`,
+    `SUMMARY:F1 ${session.sessionName} - ${session.circuitName}`,
+    `LOCATION:${session.location}, ${session.countryName}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\n");
+
+  return {
+    google: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}&details=${details}`,
+    apple: `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`,
+  };
+}
+
+class WidgetBoundary extends Component<
+  { children: ReactNode; label: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`${this.props.label} widget failed`, error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Panel>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Widget offline</div>
+              <div className="section-title mt-2 text-lg font-semibold">
+                {this.props.label} could not render
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => this.setState({ hasError: false })}
+              className={`glass-pill rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] ${FOCUS_RING}`}
+            >
+              Retry
+            </button>
+          </div>
+        </Panel>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function BriefingAction({
@@ -1505,19 +1617,25 @@ function TelemetryExperiencePanel({
   accent,
   driverLabel,
   insights,
+  isPlaying,
+  onTogglePlayback,
   sourceMeta,
   samples,
   session,
   scrubIndex,
+  workerMetrics,
   onScrub,
 }: {
   accent: string;
   driverLabel: string | null;
   insights: DashboardData["telemetryInsights"];
+  isPlaying: boolean;
+  onTogglePlayback: () => void;
   sourceMeta: DashboardData["sources"]["telemetry"];
   samples: DashboardData["telemetrySamples"];
   session: SessionSummary | null;
   scrubIndex: number;
+  workerMetrics: TelemetryWorkerMetrics;
   onScrub: (index: number | null) => void;
 }) {
   const activeIndex = clampIndex(scrubIndex, Math.max(1, samples.length));
@@ -1617,6 +1735,13 @@ function TelemetryExperiencePanel({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onTogglePlayback}
+            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] ${FOCUS_RING}`}
+          >
+            {isPlaying ? "Pause" : "Play"}
+          </button>
           <FunBadge label="Telemetry hero" tone="dark" />
           <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
             <Radio size={14} />
@@ -1646,7 +1771,7 @@ function TelemetryExperiencePanel({
         />
         <StatChip
           label="Brake zones"
-          value={insights ? `${insights.brakeEvents}` : "--"}
+          value={workerMetrics ? `${workerMetrics.brakeEvents}` : insights ? `${insights.brakeEvents}` : "--"}
         />
       </div>
 
@@ -1696,7 +1821,7 @@ function TelemetryExperiencePanel({
             </span>
           </div>
           <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>
-          <div className="mb-3 grid gap-2 sm:grid-cols-3">
+          <div className="mb-3 grid gap-2 sm:grid-cols-4">
             <div className="glass-pill rounded-[16px] px-3 py-2.5">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
                 Scrub speed
@@ -1722,6 +1847,14 @@ function TelemetryExperiencePanel({
                 style={{ color: phaseTone?.color ?? "var(--foreground)" }}
               >
                 {phaseTone?.label ?? "--"}
+              </div>
+            </div>
+            <div className="glass-pill rounded-[16px] px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                Worker delta
+              </div>
+              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+                {workerMetrics ? formatDeltaSpeed(workerMetrics.maxDelta) : "--"}
               </div>
             </div>
           </div>
@@ -1793,22 +1926,26 @@ function LiveActionDock({
   cars,
   selectedDriver,
   insights,
+  liveTiming,
   telemetrySamples,
   scrubIndex,
   drivers,
   selectedDriverId,
   onSelect,
+  onScrub,
 }: {
   circuitName: string;
   layoutKey: string;
   cars: DashboardData["trackMap"]["cars"];
   selectedDriver: DriverInsight | null;
   insights: DashboardData["telemetryInsights"];
+  liveTiming: DashboardData["liveTiming"];
   telemetrySamples: DashboardData["telemetrySamples"];
   scrubIndex: number;
   drivers: DriverInsight[];
   selectedDriverId: string;
   onSelect: (driverId: string) => void;
+  onScrub: (index: number) => void;
 }) {
   const pathRef = useRef<SVGPathElement | null>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
@@ -1844,13 +1981,26 @@ function LiveActionDock({
     const nextPositions: Record<string, { x: number; y: number }> = {};
 
     cars.forEach((car, index) => {
-      const progress = ((cars.length - index) / (cars.length + 1)) * 0.84 + 0.08;
+      const progress =
+        typeof car.trackProgress === "number"
+          ? 0.08 + car.trackProgress * 0.84
+          : ((cars.length - index) / (cars.length + 1)) * 0.84 + 0.08;
       const point = path.getPointAtLength(length * progress);
       nextPositions[car.driverId] = { x: point.x, y: point.y };
     });
 
     setPositions(nextPositions);
   }, [cars, layout.path]);
+
+  const handleMapPointer = (event: PointerEvent<SVGSVGElement>) => {
+    if (!telemetrySamples.length) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / rect.width;
+    onScrub(clampIndex(Math.round(ratio * (telemetrySamples.length - 1)), telemetrySamples.length));
+  };
 
   return (
     <aside className="xl:sticky xl:top-6 xl:self-start">
@@ -1907,7 +2057,7 @@ function LiveActionDock({
                 </span>
               ) : null}
               <span className="rounded-full border border-white/12 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                Sync on
+                {liveTiming.connection}
               </span>
             </div>
           </div>
@@ -1939,9 +2089,10 @@ function LiveActionDock({
           </div>
           <svg
             viewBox="0 0 560 320"
-            className="h-[206px] w-full sm:h-[238px]"
+            className="h-[206px] w-full cursor-crosshair sm:h-[238px]"
             role="img"
             aria-label={`${circuitName} broadcast-style circuit map`}
+            onPointerMove={handleMapPointer}
           >
             <defs>
               <linearGradient id="trackStroke" x1="0" x2="1" y1="0" y2="1">
@@ -2128,6 +2279,38 @@ function LiveActionDock({
           <Users size={16} className="text-[var(--muted)]" />
         </div>
 
+        {selectedDriver ? (
+          <div className="minimal-card mt-3 grid grid-cols-[54px_minmax(0,1fr)] items-center gap-3 rounded-[18px] p-3">
+            <Image
+              src={selectedDriver.headshotUrl}
+              alt=""
+              width={54}
+              height={54}
+              className="h-[54px] w-[54px] rounded-full border border-black/6 bg-white object-cover"
+            />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                  {selectedDriver.fullName}
+                </div>
+                <span
+                  className="telemetry-text rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  style={{
+                    background: rgba(selectedDriver.teamColor, 0.12),
+                    color: `#${selectedDriver.teamColor}`,
+                  }}
+                >
+                  {selectedDriver.abbreviation}
+                </span>
+              </div>
+              <div className="mt-1 flex items-start gap-2 text-xs text-[var(--muted)]">
+                <MessageCircle size={14} className="mt-0.5 shrink-0" />
+                <span className="line-clamp-2">{buildRadioSnippet(selectedDriver)}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="timing-lane mt-4 grid gap-2">
           {drivers.map((driver) => {
             const active = selectedDriverId === driver.id;
@@ -2241,6 +2424,40 @@ function FantasyActionPanel({
   onToggleWatch: (driverId: string) => void;
 }) {
   const feedTone = getFeedTone(sourceMeta.status);
+  const allEntries = useMemo(() => {
+    const byId = new Map<string, FantasyEntry>();
+    [...fantasy.topValue, ...fantasy.priceRisers].forEach((entry) => {
+      byId.set(entry.driverId, entry);
+    });
+    return Array.from(byId.values());
+  }, [fantasy.priceRisers, fantasy.topValue]);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [teamIds, setTeamIds] = useState<string[]>([]);
+  const selectedEntries = allEntries.filter((entry) => teamIds.includes(entry.driverId));
+  const spent = selectedEntries.reduce((sum, entry) => sum + entry.price, 0);
+  const projected = selectedEntries.reduce((sum, entry) => sum + entry.points, 0);
+  const budgetLeft = 50 - spent;
+
+  const addToTeam = (driverId: string) => {
+    setTeamIds((current) => {
+      if (current.includes(driverId) || current.length >= 5) {
+        return current;
+      }
+
+      const entry = allEntries.find((item) => item.driverId === driverId);
+      if (!entry || spent + entry.price > 50) {
+        return current;
+      }
+
+      logDashboardInteraction("fantasy_builder", entry.label);
+      return [...current, driverId];
+    });
+  };
+
+  const removeFromTeam = (driverId: string) => {
+    setTeamIds((current) => current.filter((id) => id !== driverId));
+  };
+
   const renderTrend = (seed: number) => {
     const base = [0.22, 0.38, 0.31, 0.52, 0.78].map(
       (value, index) => value + seed * 0.04 - index * 0.01,
@@ -2277,9 +2494,13 @@ function FantasyActionPanel({
             {fantasy.note}
           </div>
         </div>
-        <div className="glass-pill hidden rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] sm:block">
-          {fantasy.source}
-        </div>
+        <button
+          type="button"
+          onClick={() => setBuilderOpen((open) => !open)}
+          className={`glass-pill rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] ${FOCUS_RING}`}
+        >
+          Build your team
+        </button>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span
@@ -2289,6 +2510,81 @@ function FantasyActionPanel({
         </span>
         <span className="text-xs text-[var(--muted)]">{sourceMeta.note}</span>
       </div>
+
+      {builderOpen ? (
+        <div className="minimal-card mt-4 rounded-[20px] p-4 sm:rounded-[22px]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Builder</div>
+              <div className="section-title mt-2 text-base font-semibold">
+                5-driver cap / $50M budget
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-right">
+              <StatChip label="Drivers" value={`${teamIds.length}/5`} />
+              <StatChip label="Budget" value={`$${budgetLeft.toFixed(1)}M`} />
+              <StatChip label="Proj." value={`${projected}`} />
+            </div>
+          </div>
+          <div
+            className="mt-4 grid min-h-[108px] gap-2 rounded-[16px] border border-dashed border-black/12 bg-white/58 p-3 sm:grid-cols-5"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              addToTeam(event.dataTransfer.getData("text/plain"));
+            }}
+          >
+            {Array.from({ length: 5 }).map((_, index) => {
+              const entry = selectedEntries[index];
+              return entry ? (
+                <button
+                  key={entry.driverId}
+                  type="button"
+                  onClick={() => removeFromTeam(entry.driverId)}
+                  className={`rounded-[14px] border border-black/6 bg-white px-3 py-2 text-left ${FOCUS_RING}`}
+                >
+                  <div className="truncate text-sm font-semibold">{entry.label}</div>
+                  <div className="telemetry-text mt-1 text-xs text-[var(--muted)]">
+                    ${entry.price.toFixed(1)}M / {entry.points} pts
+                  </div>
+                </button>
+              ) : (
+                <div
+                  key={`slot-${index}`}
+                  className="grid min-h-[74px] place-items-center rounded-[14px] border border-black/6 bg-white/60 text-xs uppercase tracking-[0.14em] text-[var(--muted)]"
+                >
+                  Slot {index + 1}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {allEntries.map((entry) => {
+              const disabled =
+                teamIds.includes(entry.driverId) ||
+                teamIds.length >= 5 ||
+                spent + entry.price > 50;
+              return (
+                <button
+                  key={`builder-${entry.driverId}`}
+                  type="button"
+                  draggable={!disabled}
+                  disabled={disabled}
+                  onDragStart={(event) => event.dataTransfer.setData("text/plain", entry.driverId)}
+                  onClick={() => addToTeam(entry.driverId)}
+                  className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] transition ${
+                    disabled
+                      ? "border-black/6 bg-black/5 text-[var(--muted)] opacity-60"
+                      : "border-black/8 bg-white/78 text-[var(--foreground)] hover:-translate-y-0.5"
+                  } ${FOCUS_RING}`}
+                >
+                  {entry.label} / ${entry.price.toFixed(1)}M
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-3.5 sm:gap-4 xl:grid-cols-2">
         <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
@@ -2387,6 +2683,67 @@ function FantasyActionPanel({
             ))}
           </div>
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+function RaceControlPanel({
+  raceControl,
+}: {
+  raceControl: DashboardData["raceControl"];
+}) {
+  const [initialNow] = useState(() => Date.now());
+  const countdown = useCountdown(raceControl.countdownEndsAt, initialNow);
+  const flagTone: Record<DashboardData["raceControl"]["flag"], string> = {
+    Green: "bg-[#00a76f]",
+    Yellow: "bg-[#d5a125]",
+    Red: "bg-[#e10600]",
+    VSC: "bg-[#0066cc]",
+    SC: "bg-[#11151d]",
+  };
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Race control</div>
+            <span
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white ${flagTone[raceControl.flag]}`}
+            >
+              <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-white" />
+              {raceControl.flag}
+            </span>
+          </div>
+          <div className="section-title mt-2 text-base font-semibold sm:text-xl">
+            {raceControl.message}
+          </div>
+        </div>
+        <div className="glass-pill rounded-full px-3 py-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
+          {countdown
+            ? `${countdown.days}d ${countdown.hours}h ${countdown.minutes}m`
+            : "live monitor"}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {raceControl.events.map((event) => (
+          <div
+            key={event.id}
+            className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center"
+          >
+            <span className="telemetry-text text-xs text-[var(--muted)]">
+              {formatActivityTime(event.timestamp)}
+            </span>
+            <span className="text-sm font-medium text-[var(--foreground)]">
+              {event.message}
+            </span>
+            <span className="rounded-full border border-black/6 bg-white/78 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+              {event.type}
+            </span>
+          </div>
+        ))}
       </div>
     </Panel>
   );
@@ -2997,32 +3354,52 @@ function WeekendInfoPanel({
           </div>
           <div className="grid gap-2">
             {dashboard.nextSessions.length ? (
-              dashboard.nextSessions.map((session, index) => (
-                <div
-                  key={session.sessionKey}
-                  className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 sm:grid-cols-[52px_minmax(0,1fr)_auto] sm:items-center"
-                >
-                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-[var(--foreground)]">
-                      {session.sessionName}
+              dashboard.nextSessions.map((session, index) => {
+                const weather = dashboard.weekendWeather.find(
+                  (item) => item.sessionKey === session.sessionKey,
+                );
+                const links = buildCalendarLinks(session);
+
+                return (
+                  <div
+                    key={session.sessionKey}
+                    className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 sm:grid-cols-[52px_minmax(0,1fr)_auto] sm:items-center"
+                  >
+                    <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-[var(--foreground)]">
+                        {session.sessionName}
+                      </div>
+                      <div className="truncate text-xs text-[var(--muted)]">
+                        {session.location}, {session.countryName}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                        {weather ? (
+                          <span>
+                            {weather.temperatureC}C / {weather.rainChance}% rain / {weather.summary}
+                          </span>
+                        ) : null}
+                        <a href={links.google} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                          Google
+                        </a>
+                        <a href={links.apple} className="underline underline-offset-2">
+                          Apple
+                        </a>
+                      </div>
                     </div>
-                    <div className="truncate text-xs text-[var(--muted)]">
-                      {session.location}, {session.countryName}
+                    <div className="text-left sm:text-right">
+                      <div className="telemetry-text text-sm font-semibold">
+                        {formatTrackDate(session.dateStart, session.gmtOffset)}
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {formatSessionDate(session.dateStart)}
+                      </div>
                     </div>
                   </div>
-                  <div className="text-left sm:text-right">
-                    <div className="telemetry-text text-sm font-semibold">
-                      {formatTrackDate(session.dateStart, session.gmtOffset)}
-                    </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {formatSessionDate(session.dateStart)}
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 text-sm text-[var(--muted)]">
                 No upcoming sessions are published in the current feed snapshot.
@@ -3159,41 +3536,48 @@ function WatchlistPanel({
 }
 
 export function DashboardClient({ initialData }: { initialData: DashboardData }) {
-  const { data, refetch, isFetching, error } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: async () => {
-      const response = await fetch("/api/dashboard", { cache: "no-store" });
+  const dispatch = useAppDispatch();
+  const query = useGetDashboardQuery();
+  const [offlineData, setOfflineData] = useState<DashboardData | null>(null);
+  const data = query.data ?? offlineData ?? initialData;
+  const refetch = () => query.refetch().unwrap();
+  const isFetching = query.isFetching;
+  const error = query.error;
 
-      if (!response.ok) {
-        throw new Error("Dashboard refresh failed");
+  useEffect(() => {
+    dispatch(
+      dashboardApi.util.upsertQueryData("getDashboard", undefined, initialData),
+    );
+    void saveDashboardSnapshot(initialData);
+  }, [dispatch, initialData]);
+
+  useEffect(() => {
+    void loadLatestDashboardSnapshot().then((snapshot) => {
+      if (snapshot) {
+        setOfflineData(snapshot);
       }
-
-      return (await response.json()) as DashboardData;
-    },
-    initialData,
-    staleTime: 20_000,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-  });
+    });
+  }, []);
 
   useVisibilityRefresh(refetch);
   const isOnline = useOnlineStatus();
+  const ui = useAppSelector((state) => state.dashboardUi);
+  const telemetryWorkerMetrics = useTelemetryWorker(data.telemetrySamples);
 
   const snapshotNow = useMemo(
     () => new Date(data.generatedAt).getTime(),
     [data.generatedAt],
   );
   const freshness = useRelativeTime(snapshotNow, snapshotNow);
-  const [selectedDriverId, setSelectedDriverId] = useState(
-    data.standings[0]?.id ?? "",
-  );
-  const [watchlist, setWatchlist] = useState<Set<string>>(() => new Set());
-  const [scrubIndex, setScrubIndex] = useState(
-    Math.max(0, data.telemetrySamples.length - 1),
-  );
+  const selectedDriverId = ui.selectedDriverId;
+  const watchlist = useMemo(() => new Set(ui.watchlist), [ui.watchlist]);
+  const scrubIndex = ui.scrubIndex;
+  const activeTab = isDashboardTab(ui.activeTab) ? ui.activeTab : "overview";
+  const isTelemetryPlaying = ui.isTelemetryPlaying;
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  const scrubFrameRef = useRef<number | null>(null);
+  const lastPlayFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setHasMounted(true));
@@ -3213,22 +3597,29 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           activeTab?: string;
           selectedDriverId?: string;
           watchlist?: string[];
+          scrubIndex?: number;
+          isTelemetryPlaying?: boolean;
+          themeMode?: "system" | "light" | "dark";
         };
 
-        if (isDashboardTab(parsed.activeTab)) {
-          setActiveTab(parsed.activeTab);
-        }
-
-        if (
-          parsed.selectedDriverId &&
-          data.standings.some((driver) => driver.id === parsed.selectedDriverId)
-        ) {
-          setSelectedDriverId(parsed.selectedDriverId);
-        }
-
-        if (Array.isArray(parsed.watchlist)) {
-          setWatchlist(new Set(parsed.watchlist));
-        }
+        dispatch(
+          hydratePreferences({
+            activeTab: isDashboardTab(parsed.activeTab) ? parsed.activeTab : undefined,
+            selectedDriverId:
+              parsed.selectedDriverId &&
+              data.standings.some((driver) => driver.id === parsed.selectedDriverId)
+                ? parsed.selectedDriverId
+                : undefined,
+            watchlist: Array.isArray(parsed.watchlist) ? parsed.watchlist : undefined,
+            scrubIndex:
+              typeof parsed.scrubIndex === "number" ? parsed.scrubIndex : undefined,
+            isTelemetryPlaying:
+              typeof parsed.isTelemetryPlaying === "boolean"
+                ? parsed.isTelemetryPlaying
+                : undefined,
+            themeMode: parsed.themeMode,
+          }),
+        );
       } catch {
         window.localStorage.removeItem(DASHBOARD_PREFS_KEY);
       } finally {
@@ -3237,7 +3628,13 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [data.standings]);
+  }, [data.standings, dispatch]);
+
+  useEffect(() => {
+    if (!selectedDriverId && data.standings[0]?.id) {
+      dispatch(setSelectedDriverId(data.standings[0].id));
+    }
+  }, [data.standings, dispatch, selectedDriverId]);
 
   useEffect(() => {
     if (!prefsLoaded) {
@@ -3250,13 +3647,45 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         JSON.stringify({
           activeTab,
           selectedDriverId,
-          watchlist: Array.from(watchlist),
+          watchlist: ui.watchlist,
+          scrubIndex,
+          isTelemetryPlaying,
+          themeMode: ui.themeMode,
         }),
       );
     } catch {
       // Preferences are a convenience; private browsing/storage limits should not affect the dashboard.
     }
-  }, [activeTab, prefsLoaded, selectedDriverId, watchlist]);
+  }, [
+    activeTab,
+    isTelemetryPlaying,
+    prefsLoaded,
+    scrubIndex,
+    selectedDriverId,
+    ui.themeMode,
+    ui.watchlist,
+  ]);
+
+  useEffect(() => {
+    if (!hasMounted) {
+      return;
+    }
+
+    const root = document.documentElement;
+    if (ui.themeMode === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.dataset.theme = ui.themeMode;
+    }
+
+    logDashboardInteraction("theme_change", ui.themeMode);
+  }, [hasMounted, ui.themeMode]);
+
+  useEffect(() => {
+    if (hasMounted) {
+      markDashboardInteractive();
+    }
+  }, [hasMounted]);
 
   const effectiveSelectedDriverId = useMemo(
     () =>
@@ -3280,17 +3709,131 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const accent = selectedDriver?.teamColor ?? "E10600";
   const themeStyle = useMemo(() => buildThemeStyle(accent), [accent]);
 
-  const toggleWatch = (driverId: string) => {
-    setWatchlist((current) => {
-      const next = new Set(current);
-      if (next.has(driverId)) {
-        next.delete(driverId);
-      } else {
-        next.add(driverId);
-      }
-      return next;
-    });
+  const selectDriver = (driverId: string) => {
+    dispatch(setSelectedDriverId(driverId));
+    logDashboardInteraction("driver_select", driverId);
   };
+
+  const setActiveTab = (tab: DashboardTab) => {
+    dispatch(setActiveTabAction(tab));
+    logDashboardInteraction("tab_change", tab);
+  };
+
+  const scrubTo = (index: number) => {
+    const nextIndex = clampIndex(index, Math.max(1, data.telemetrySamples.length));
+    if (scrubFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrubFrameRef.current);
+    }
+    scrubFrameRef.current = window.requestAnimationFrame(() => {
+      dispatch(setScrubIndex(nextIndex));
+    });
+    logDashboardInteraction("telemetry_scrub", String(nextIndex));
+  };
+
+  const scrubToLive = () => {
+    scrubTo(Math.max(0, data.telemetrySamples.length - 1));
+  };
+
+  const toggleWatch = (driverId: string) => {
+    dispatch(toggleWatchlist(driverId));
+  };
+
+  const togglePlayback = () => {
+    dispatch(setTelemetryPlaying(!isTelemetryPlaying));
+    logDashboardInteraction("telemetry_playback", isTelemetryPlaying ? "pause" : "play");
+  };
+
+  useEffect(() => {
+    if (
+      !isTelemetryPlaying ||
+      data.liveTiming.connection === "offline" ||
+      !data.telemetrySamples.length
+    ) {
+      return;
+    }
+
+    dispatch(
+      setScrubIndex(
+        clampIndex(data.liveTiming.sampleIndex, data.telemetrySamples.length),
+      ),
+    );
+  }, [
+    data.liveTiming.connection,
+    data.liveTiming.receivedAt,
+    data.liveTiming.sampleIndex,
+    data.telemetrySamples.length,
+    dispatch,
+    isTelemetryPlaying,
+  ]);
+
+  useEffect(() => {
+    if (!isTelemetryPlaying || !data.telemetrySamples.length) {
+      lastPlayFrameRef.current = null;
+      return;
+    }
+
+    let frame = 0;
+    const tick = (timestamp: number) => {
+      const previous = lastPlayFrameRef.current ?? timestamp;
+      if (timestamp - previous >= 100 && data.liveTiming.connection === "offline") {
+        dispatch(
+          setScrubIndex(
+            (effectiveScrubIndex + 1) % Math.max(1, data.telemetrySamples.length),
+          ),
+        );
+        lastPlayFrameRef.current = timestamp;
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    data.liveTiming.connection,
+    data.telemetrySamples.length,
+    dispatch,
+    effectiveScrubIndex,
+    isTelemetryPlaying,
+  ]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.getAttribute("role") === "slider"
+      ) {
+        return;
+      }
+
+      if (event.code === "Space") {
+        event.preventDefault();
+        togglePlayback();
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const currentIndex = data.standings.findIndex(
+          (driver) => driver.id === effectiveSelectedDriverId,
+        );
+        if (currentIndex >= 0) {
+          event.preventDefault();
+          const direction = event.key === "ArrowRight" ? 1 : -1;
+          const nextDriver =
+            data.standings[
+              (currentIndex + direction + data.standings.length) %
+                data.standings.length
+            ];
+          if (nextDriver) {
+            selectDriver(nextDriver.id);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   return (
     <main
@@ -3300,17 +3843,30 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-[11px]">
           <span className="pulse-dot h-2 w-2 rounded-full bg-[var(--team-accent)]" />
-          live surface
+          {data.liveTiming.connection === "offline"
+            ? "offline-ready surface"
+            : `${data.liveTiming.connection} stream`}
         </div>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          aria-label="Refresh dashboard data"
-          className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
-        >
-          <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
-          {isFetching ? "Refreshing" : "Refresh now"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => dispatch(cycleThemeMode())}
+            aria-label="Cycle color mode"
+            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
+          >
+            <SunMoon size={14} />
+            {ui.themeMode}
+          </button>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            aria-label="Refresh dashboard data"
+            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
+          >
+            <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
+            {isFetching ? "Refreshing" : "Refresh now"}
+          </button>
+        </div>
       </div>
 
       {hasMounted && (!isOnline || error) ? (
@@ -3353,47 +3909,56 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             onNavigate={setActiveTab}
           />
 
+          <WidgetBoundary label="Race control">
+            <RaceControlPanel raceControl={data.raceControl} />
+          </WidgetBoundary>
+
           <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
             <div className="grid gap-4 sm:gap-5">
-              <TelemetryExperiencePanel
-                accent={accent}
-                driverLabel={data.telemetryDriverLabel}
-                insights={data.telemetryInsights}
-                sourceMeta={data.sources.telemetry}
-                samples={data.telemetrySamples}
-                session={data.telemetrySession}
-                scrubIndex={effectiveScrubIndex}
-                onScrub={(index) =>
-                  setScrubIndex(
-                    index === null
-                      ? Math.max(0, data.telemetrySamples.length - 1)
-                      : index,
-                  )
-                }
-              />
+              <WidgetBoundary label="Telemetry">
+                <TelemetryExperiencePanel
+                  accent={accent}
+                  driverLabel={data.telemetryDriverLabel}
+                  insights={data.telemetryInsights}
+                  isPlaying={isTelemetryPlaying}
+                  onTogglePlayback={togglePlayback}
+                  sourceMeta={data.sources.telemetry}
+                  samples={data.telemetrySamples}
+                  session={data.telemetrySession}
+                  scrubIndex={effectiveScrubIndex}
+                  workerMetrics={telemetryWorkerMetrics}
+                  onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
+                />
+              </WidgetBoundary>
 
               <PerformanceProfilePanel driver={selectedDriver} />
 
-              <FantasyActionPanel
-                fantasy={data.fantasy}
-                sourceMeta={data.sources.fantasy}
-                watchlist={watchlist}
-                onToggleWatch={toggleWatch}
-              />
+              <WidgetBoundary label="Fantasy hub">
+                <FantasyActionPanel
+                  fantasy={data.fantasy}
+                  sourceMeta={data.sources.fantasy}
+                  watchlist={watchlist}
+                  onToggleWatch={toggleWatch}
+                />
+              </WidgetBoundary>
             </div>
 
-            <LiveActionDock
-              circuitName={data.trackMap.circuitName}
-              layoutKey={data.trackMap.layoutKey}
-              cars={data.trackMap.cars}
-              selectedDriver={selectedDriver}
-              insights={data.telemetryInsights}
-              telemetrySamples={data.telemetrySamples}
-              scrubIndex={effectiveScrubIndex}
-              drivers={data.standings}
-              selectedDriverId={effectiveSelectedDriverId}
-              onSelect={setSelectedDriverId}
-            />
+            <WidgetBoundary label="Track map">
+              <LiveActionDock
+                circuitName={data.trackMap.circuitName}
+                layoutKey={data.trackMap.layoutKey}
+                cars={data.trackMap.cars}
+                selectedDriver={selectedDriver}
+                insights={data.telemetryInsights}
+                liveTiming={data.liveTiming}
+                telemetrySamples={data.telemetrySamples}
+                scrubIndex={effectiveScrubIndex}
+                drivers={data.standings}
+                selectedDriverId={effectiveSelectedDriverId}
+                onSelect={selectDriver}
+                onScrub={scrubTo}
+              />
+            </WidgetBoundary>
           </div>
         </div>
       ) : null}
@@ -3411,7 +3976,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <TimingBoardPanel
             drivers={data.standings}
             selectedDriverId={effectiveSelectedDriverId}
-            onSelect={setSelectedDriverId}
+            onSelect={selectDriver}
           />
           <LiveActionDock
             circuitName={data.trackMap.circuitName}
@@ -3419,11 +3984,13 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             cars={data.trackMap.cars}
             selectedDriver={selectedDriver}
             insights={data.telemetryInsights}
+            liveTiming={data.liveTiming}
             telemetrySamples={data.telemetrySamples}
             scrubIndex={effectiveScrubIndex}
             drivers={data.standings}
             selectedDriverId={effectiveSelectedDriverId}
-            onSelect={setSelectedDriverId}
+            onSelect={selectDriver}
+            onScrub={scrubTo}
           />
         </div>
       ) : null}
@@ -3435,17 +4002,14 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               accent={accent}
               driverLabel={data.telemetryDriverLabel}
               insights={data.telemetryInsights}
+              isPlaying={isTelemetryPlaying}
+              onTogglePlayback={togglePlayback}
               sourceMeta={data.sources.telemetry}
               samples={data.telemetrySamples}
               session={data.telemetrySession}
               scrubIndex={effectiveScrubIndex}
-              onScrub={(index) =>
-                setScrubIndex(
-                  index === null
-                    ? Math.max(0, data.telemetrySamples.length - 1)
-                    : index,
-                )
-              }
+              workerMetrics={telemetryWorkerMetrics}
+              onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
             />
             <PerformanceProfilePanel driver={selectedDriver} />
           </div>
@@ -3455,11 +4019,13 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             cars={data.trackMap.cars}
             selectedDriver={selectedDriver}
             insights={data.telemetryInsights}
+            liveTiming={data.liveTiming}
             telemetrySamples={data.telemetrySamples}
             scrubIndex={effectiveScrubIndex}
             drivers={data.standings}
             selectedDriverId={effectiveSelectedDriverId}
-            onSelect={setSelectedDriverId}
+            onSelect={selectDriver}
+            onScrub={scrubTo}
           />
         </div>
       ) : null}
