@@ -12,6 +12,8 @@ import {
   Map as MapIcon,
   MessageCircle,
   Newspaper,
+  Share2,
+  Mic,
   Radio,
   RefreshCw,
   SunMoon,
@@ -52,6 +54,7 @@ import {
   setTelemetryPlaying,
   toggleWatchlist,
 } from "@/lib/store/ui-slice";
+import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
@@ -538,7 +541,35 @@ function getLapTone(value: number, best: number) {
 }
 
 function clampIndex(index: number, length: number) {
-  return Math.max(0, Math.min(length - 1, index));
+  const safeLength = Number.isFinite(length) ? Math.max(1, Math.floor(length)) : 1;
+  const safeIndex = Number.isFinite(index) ? index : 0;
+
+  return Math.round(Math.max(0, Math.min(safeLength - 1, safeIndex)));
+}
+
+function clampUnit(value: number, fallback = 0) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function getPathPointAtProgress(path: SVGPathElement, progress: number) {
+  const length = path.getTotalLength();
+  if (!Number.isFinite(length) || length <= 0) {
+    return null;
+  }
+
+  const distance = length * clampUnit(progress);
+  if (!Number.isFinite(distance)) {
+    return null;
+  }
+
+  const point = path.getPointAtLength(distance);
+  return Number.isFinite(point.x) && Number.isFinite(point.y)
+    ? { x: point.x, y: point.y }
+    : null;
 }
 
 function formatDeltaSpeed(value: number) {
@@ -681,8 +712,33 @@ type TelemetryWorkerMetrics = {
   fastestElapsed: number;
   maxDelta: number;
   brakeEvents: number;
+  avgAcceleration: number;
+  projectedNextSpeed: number;
   sampledAt: number;
 } | null;
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionEventLike = {
+  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+};
+
+type SpeechWindow = Window &
+  typeof globalThis & {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  };
 
 function useTelemetryWorker(samples: DashboardData["telemetrySamples"]) {
   const [metrics, setMetrics] = useState<TelemetryWorkerMetrics>(null);
@@ -744,6 +800,129 @@ function buildCalendarLinks(session: SessionSummary) {
     google: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}&details=${details}`,
     apple: `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`,
   };
+}
+
+function predictNextLapTime(samples: DashboardData["telemetrySamples"]) {
+  const tail = samples.slice(-3);
+  if (tail.length < 2) {
+    return null;
+  }
+
+  const last = tail.at(-1);
+  if (!last || last.elapsed <= 0) {
+    return null;
+  }
+
+  const avgSpeed = Math.max(
+    1,
+    tail.reduce((sum, sample) => sum + sample.speed, 0) / tail.length,
+  );
+  const avgThrottle =
+    tail.reduce((sum, sample) => sum + sample.throttle, 0) / tail.length / 100;
+  const avgBrake = tail.reduce((sum, sample) => sum + sample.brake, 0) / tail.length / 100;
+  const momentum =
+    (tail[tail.length - 1].speed - tail[0].speed) / Math.max(1, tail.length - 1);
+  const completion = Math.max(0.05, Math.min(0.98, last.trackPosition || 0.72));
+  const remainingRatio = (1 - completion) / completion;
+  const paceBias = 1 - avgThrottle * 0.045 + avgBrake * 0.075 - momentum / avgSpeed * 0.18;
+
+  return Math.max(last.elapsed, last.elapsed + last.elapsed * remainingRatio * paceBias);
+}
+
+function findDriverFromVoice(transcript: string, drivers: DriverInsight[]) {
+  const normalized = transcript.toLowerCase();
+
+  return drivers.find((driver) => {
+    const aliases = [
+      driver.fullName,
+      driver.firstName,
+      driver.lastName,
+      driver.abbreviation,
+      driver.teamName,
+    ].map((value) => value.toLowerCase());
+
+    return aliases.some((alias) => alias && normalized.includes(alias));
+  });
+}
+
+async function shareDriverCard(
+  driver: DriverInsight,
+  predictedLap: number | null,
+  activeSample: DashboardData["telemetrySamples"][number] | null,
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 630;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+
+  const accent = `#${driver.teamColor}`;
+  const gradient = context.createLinearGradient(0, 0, 1200, 630);
+  gradient.addColorStop(0, "#10151f");
+  gradient.addColorStop(0.58, "#181f2b");
+  gradient.addColorStop(1, accent);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 1200, 630);
+
+  context.fillStyle = "rgba(255,255,255,0.08)";
+  context.fillRect(72, 72, 1056, 486);
+  context.fillStyle = accent;
+  context.fillRect(72, 72, 16, 486);
+
+  context.fillStyle = "rgba(255,255,255,0.72)";
+  context.font = "28px Arial";
+  context.fillText("POLE POSITION HQ DRIVER CARD", 116, 132);
+  context.fillStyle = "#ffffff";
+  context.font = "700 76px Arial";
+  context.fillText(driver.fullName, 116, 230);
+  context.font = "700 38px Arial";
+  context.fillText(`${driver.teamName} | ${driver.abbreviation}`, 116, 286);
+
+  const stats = [
+    ["Position", `P${driver.standingPosition}`],
+    ["Points", String(driver.points)],
+    ["Speed", activeSample ? `${activeSample.speed} km/h` : "--"],
+    ["Predicted lap", predictedLap ? formatLapTime(predictedLap) : "--"],
+  ];
+
+  stats.forEach(([label, value], index) => {
+    const x = 116 + index * 252;
+    context.fillStyle = "rgba(255,255,255,0.64)";
+    context.font = "24px Arial";
+    context.fillText(label, x, 410);
+    context.fillStyle = "#ffffff";
+    context.font = "700 38px Arial";
+    context.fillText(value, x, 462);
+  });
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/png", 0.92),
+  );
+  if (!blob) {
+    return;
+  }
+
+  const file = new File([blob], `${driver.abbreviation.toLowerCase()}-driver-card.png`, {
+    type: "image/png",
+  });
+  const nav = navigator as Navigator & {
+    canShare?: (data: { files: File[] }) => boolean;
+    share?: (data: { files: File[]; title: string }) => Promise<void>;
+  };
+
+  if (nav.canShare?.({ files: [file] }) && nav.share) {
+    await nav.share({ files: [file], title: `${driver.fullName} driver card` });
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.name;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 class WidgetBoundary extends Component<
@@ -1920,6 +2099,154 @@ function TelemetryExperiencePanel({
   );
 }
 
+function AdvancedTelemetryPanel({
+  activeSample,
+  drivers,
+  selectedDriver,
+  samples,
+  workerMetrics,
+  onSelectDriver,
+}: {
+  activeSample: DashboardData["telemetrySamples"][number] | null;
+  drivers: DriverInsight[];
+  selectedDriver: DriverInsight | null;
+  samples: DashboardData["telemetrySamples"];
+  workerMetrics: TelemetryWorkerMetrics;
+  onSelectDriver: (driverId: string) => void;
+}) {
+  const [voiceState, setVoiceState] = useState<"idle" | "listening" | "unsupported">(
+    "idle",
+  );
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const predictedLap = useMemo(() => predictNextLapTime(samples), [samples]);
+  const predictionConfidence = useMemo(() => {
+    if (!samples.length || !workerMetrics) {
+      return 0;
+    }
+
+    const stableAcceleration = Math.max(
+      0,
+      1 - Math.abs(workerMetrics.avgAcceleration) / 18,
+    );
+    return Math.round(Math.min(96, 52 + stableAcceleration * 34 + samples.length / 12));
+  }, [samples.length, workerMetrics]);
+
+  useEffect(() => {
+    return () => recognitionRef.current?.stop();
+  }, []);
+
+  const startVoiceCommand = () => {
+    const speechWindow = window as SpeechWindow;
+    const Recognition =
+      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+
+    if (!Recognition) {
+      setVoiceState("unsupported");
+      setVoiceTranscript("Speech recognition is not available in this browser.");
+      return;
+    }
+
+    recognitionRef.current?.stop();
+    const recognition = new Recognition();
+    recognitionRef.current = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const result = event.results[0]?.[0]?.transcript ?? "";
+      const matchedDriver = findDriverFromVoice(result, drivers);
+      setVoiceTranscript(result || "No command heard.");
+      if (matchedDriver) {
+        onSelectDriver(matchedDriver.id);
+        logDashboardInteraction("voice_driver_select", matchedDriver.abbreviation);
+      }
+    };
+    recognition.onerror = () => {
+      setVoiceState("idle");
+      setVoiceTranscript("Voice command was interrupted.");
+    };
+    recognition.onend = () => setVoiceState("idle");
+    setVoiceState("listening");
+    recognition.start();
+  };
+
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Next level</div>
+            <FunBadge label="Local AI" tone="accent" />
+          </div>
+          <div className="section-title mt-2 text-base font-semibold sm:text-xl">
+            Prediction suite
+          </div>
+        </div>
+        {selectedDriver ? (
+          <button
+            type="button"
+            onClick={() => {
+              void shareDriverCard(selectedDriver, predictedLap, activeSample);
+              logDashboardInteraction("share_driver_card", selectedDriver.abbreviation);
+            }}
+            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.16em] text-[var(--muted)] ${FOCUS_RING}`}
+          >
+            <Share2 size={14} />
+            Driver card
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="minimal-card rounded-[18px] p-4">
+          <div className="eyebrow">Lap predictor</div>
+          <div className="telemetry-text mt-2 text-2xl font-semibold text-[var(--foreground)]">
+            {predictedLap ? formatLapTime(predictedLap) : "--"}
+          </div>
+          <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
+            Last-3 sample window with throttle, brake, and track progress weighted in.
+          </div>
+        </div>
+
+        <div className="minimal-card rounded-[18px] p-4">
+          <div className="eyebrow">Model confidence</div>
+          <div className="telemetry-text mt-2 text-2xl font-semibold text-[var(--foreground)]">
+            {predictionConfidence ? `${predictionConfidence}%` : "--"}
+          </div>
+          <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
+            Worker signal: {workerMetrics ? `${workerMetrics.projectedNextSpeed.toFixed(0)} km/h next sample` : "waiting for samples"}.
+          </div>
+        </div>
+
+        <div className="minimal-card rounded-[18px] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="eyebrow">Voice command</div>
+              <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">
+                Show driver trace
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={startVoiceCommand}
+              className={`grid h-10 w-10 place-items-center rounded-full bg-[var(--team-accent)] text-white ${FOCUS_RING}`}
+              aria-label="Start voice command"
+            >
+              <Mic size={16} />
+            </button>
+          </div>
+          <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
+            {voiceState === "listening"
+              ? "Listening..."
+              : voiceTranscript || "Awaiting garage command."}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 function LiveActionDock({
   circuitName,
   layoutKey,
@@ -1955,7 +2282,10 @@ function LiveActionDock({
   const phaseTone = activeSample ? getPhaseTone(activeSample.phase) : null;
   const scrubProgress =
     telemetrySamples.length > 1
-      ? clampIndex(scrubIndex, telemetrySamples.length) / (telemetrySamples.length - 1)
+      ? clampUnit(
+          clampIndex(scrubIndex, telemetrySamples.length) /
+            Math.max(1, telemetrySamples.length - 1),
+        )
       : 0;
   const [scrubPoint, setScrubPoint] = useState<{ x: number; y: number } | null>(null);
 
@@ -1966,27 +2296,28 @@ function LiveActionDock({
       return;
     }
 
-    const length = path.getTotalLength();
-    const point = path.getPointAtLength(length * (0.08 + scrubProgress * 0.84));
-    setScrubPoint({ x: point.x, y: point.y });
+    const point = getPathPointAtProgress(path, 0.08 + scrubProgress * 0.84);
+    setScrubPoint(point);
   }, [layout.path, scrubProgress]);
 
   useEffect(() => {
     const path = pathRef.current;
     if (!path || !cars.length) {
+      setPositions({});
       return;
     }
 
-    const length = path.getTotalLength();
     const nextPositions: Record<string, { x: number; y: number }> = {};
 
     cars.forEach((car, index) => {
       const progress =
-        typeof car.trackProgress === "number"
-          ? 0.08 + car.trackProgress * 0.84
+        Number.isFinite(car.trackProgress)
+          ? 0.08 + clampUnit(car.trackProgress) * 0.84
           : ((cars.length - index) / (cars.length + 1)) * 0.84 + 0.08;
-      const point = path.getPointAtLength(length * progress);
-      nextPositions[car.driverId] = { x: point.x, y: point.y };
+      const point = getPathPointAtProgress(path, progress);
+      if (point) {
+        nextPositions[car.driverId] = point;
+      }
     });
 
     setPositions(nextPositions);
@@ -1999,6 +2330,10 @@ function LiveActionDock({
 
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
+    if (!Number.isFinite(ratio)) {
+      return;
+    }
+
     onScrub(clampIndex(Math.round(ratio * (telemetrySamples.length - 1)), telemetrySamples.length));
   };
 
@@ -3705,6 +4040,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       null,
     [data.standings, effectiveSelectedDriverId],
   );
+  const activeTelemetrySample =
+    data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
 
   const accent = selectedDriver?.teamColor ?? "E10600";
   const themeStyle = useMemo(() => buildThemeStyle(accent), [accent]);
@@ -3931,6 +4268,17 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 />
               </WidgetBoundary>
 
+              <WidgetBoundary label="Advanced telemetry">
+                <AdvancedTelemetryPanel
+                  activeSample={activeTelemetrySample}
+                  drivers={data.standings}
+                  selectedDriver={selectedDriver}
+                  samples={data.telemetrySamples}
+                  workerMetrics={telemetryWorkerMetrics}
+                  onSelectDriver={selectDriver}
+                />
+              </WidgetBoundary>
+
               <PerformanceProfilePanel driver={selectedDriver} />
 
               <WidgetBoundary label="Fantasy hub">
@@ -4010,6 +4358,26 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               scrubIndex={effectiveScrubIndex}
               workerMetrics={telemetryWorkerMetrics}
               onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
+            />
+            <WidgetBoundary label="F1 telemetry suite">
+              <F1TelemetrySuite
+                circuitName={data.trackMap.circuitName}
+                drivers={data.standings}
+                samples={data.telemetrySamples}
+                scrubIndex={effectiveScrubIndex}
+                selectedDriver={selectedDriver}
+                selectedDriverId={effectiveSelectedDriverId}
+                onScrub={scrubTo}
+                onSelectDriver={selectDriver}
+              />
+            </WidgetBoundary>
+            <AdvancedTelemetryPanel
+              activeSample={activeTelemetrySample}
+              drivers={data.standings}
+              selectedDriver={selectedDriver}
+              samples={data.telemetrySamples}
+              workerMetrics={telemetryWorkerMetrics}
+              onSelectDriver={selectDriver}
             />
             <PerformanceProfilePanel driver={selectedDriver} />
           </div>
