@@ -6,6 +6,8 @@ type InteractionName =
   | "telemetry_scrub"
   | "telemetry_playback"
   | "fantasy_builder"
+  | "share_driver_card"
+  | "voice_driver_select"
   | "theme_change";
 
 const ANALYTICS_KEY = "pphq-analytics/v1";
