@@ -8,7 +8,8 @@ type InteractionName =
   | "fantasy_builder"
   | "share_driver_card"
   | "voice_driver_select"
-  | "theme_change";
+  | "theme_change"
+  | "visual_theme_change";
 
 const ANALYTICS_KEY = "pphq-analytics/v1";
 

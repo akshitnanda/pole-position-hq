@@ -14,6 +14,8 @@
   --panel-strong: rgba(253, 252, 249, 0.96);
   --muted: rgba(57, 60, 65, 0.7);
   --line: rgba(17, 18, 20, 0.12);
+  --surface: rgba(255, 255, 255, 0.58);
+  --surface-strong: rgba(255, 255, 255, 0.82);
   --accent: #e10600;
   --accent-soft: #ff6a61;
   --track: #151922;
@@ -28,6 +30,8 @@
     --panel-strong: rgba(28, 34, 45, 0.92);
     --muted: rgba(210, 218, 230, 0.7);
     --line: rgba(255, 255, 255, 0.1);
+    --surface: rgba(255, 255, 255, 0.055);
+    --surface-strong: rgba(255, 255, 255, 0.09);
     --track: #f5f7fb;
     --shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
     --f1-glass-bg: rgba(0, 0, 0, 0.6);
@@ -36,12 +40,15 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --background: #0d1118;
   --foreground: #f6f8fb;
   --panel: rgba(20, 25, 34, 0.78);
   --panel-strong: rgba(28, 34, 45, 0.92);
   --muted: rgba(210, 218, 230, 0.7);
   --line: rgba(255, 255, 255, 0.1);
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-strong: rgba(255, 255, 255, 0.09);
   --track: #f5f7fb;
   --shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
   --f1-glass-bg: rgba(0, 0, 0, 0.6);
@@ -467,6 +474,24 @@ button {
   min-height: 52px;
 }
 
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: -7rem;
+  left: 8%;
+  width: min(780px, 82vw);
+  height: 360px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at top, var(--team-accent-wash), transparent 68%);
+  filter: saturate(1.18);
+}
+
 .utility-button {
   background: color-mix(in srgb, var(--panel-strong) 88%, transparent);
   transition:
@@ -487,6 +512,11 @@ button {
 
 .dashboard-tabs button {
   border-radius: 4px;
+}
+
+.theme-menu,
+.theme-option {
+  border-radius: 6px;
 }
 
 .race-hero {
@@ -558,6 +588,26 @@ button {
 
 .countdown-cell:first-child {
   border-left: 0;
+}
+
+:root[data-theme="dark"] [class*="bg-white/"],
+:root[data-theme="dark"] [class*="bg-white\[/"] {
+  background-color: var(--surface) !important;
+}
+
+:root[data-theme="dark"] [class*="border-black/"] {
+  border-color: var(--line) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [class*="bg-white/"],
+  :root:not([data-theme="light"]) [class*="bg-white\[/"] {
+    background-color: var(--surface) !important;
+  }
+
+  :root:not([data-theme="light"]) [class*="border-black/"] {
+    border-color: var(--line) !important;
+  }
 }
 
 @media (min-width: 1024px) {

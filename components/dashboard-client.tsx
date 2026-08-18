@@ -5,6 +5,8 @@ import {
   Activity,
   ArrowUpRight,
   CalendarDays,
+  Check,
+  ChevronDown,
   Clock3,
   Flag,
   Gauge,
@@ -12,6 +14,7 @@ import {
   Map as MapIcon,
   MessageCircle,
   Newspaper,
+  Palette,
   Share2,
   Mic,
   Radio,
@@ -52,6 +55,7 @@ import {
   setScrubIndex,
   setSelectedDriverId,
   setTelemetryPlaying,
+  setVisualTheme,
   toggleWatchlist,
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
@@ -68,6 +72,13 @@ type DashboardTab =
   | "stats"
   | "weekend"
   | "fantasy";
+
+type VisualThemeOption = {
+  id: string;
+  label: string;
+  accent: string;
+  detail: string;
+};
 
 const DASHBOARD_TABS: Array<{
   id: DashboardTab;
@@ -264,11 +275,94 @@ function useOnlineStatus() {
 }
 
 function buildThemeStyle(accent: string): CSSProperties {
+  const normalized = accent.replace("#", "").padEnd(6, "0").slice(0, 6);
+  const value = Number.parseInt(normalized, 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+
   return {
-    ["--team-accent" as string]: `#${accent}`,
-    ["--team-accent-soft" as string]: rgba(accent, 0.14),
-    ["--team-accent-wash" as string]: rgba(accent, 0.06),
+    ["--team-accent" as string]: `#${normalized}`,
+    ["--team-accent-soft" as string]: rgba(normalized, 0.14),
+    ["--team-accent-wash" as string]: rgba(normalized, 0.07),
+    ["--theme-on-accent" as string]: luminance > 0.62 ? "#101114" : "#ffffff",
   };
+}
+
+function ThemePicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: VisualThemeOption[];
+  value: string;
+  onChange: (themeId: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const active = options.find((option) => option.id === value) ?? options[0];
+
+  useEffect(() => {
+    const close = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
+
+  return (
+    <div ref={pickerRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+        className={`utility-button inline-flex h-9 items-center gap-2 border border-[var(--line)] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)] ${FOCUS_RING}`}
+      >
+        <Palette size={14} />
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: `#${active.accent}` }} />
+        <span className="hidden sm:inline">{active.label}</span>
+        <ChevronDown size={12} className={`hidden transition sm:block ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {isOpen ? (
+        <div className="theme-menu absolute right-0 top-[calc(100%+8px)] z-50 w-[min(330px,calc(100vw-24px))] border border-[var(--line)] bg-[var(--panel-strong)] p-2 shadow-[0_20px_55px_rgba(0,0,0,0.18)] backdrop-blur-xl" role="listbox" aria-label="Dashboard color theme">
+          <div className="px-2 pb-2 pt-1">
+            <div className="eyebrow">Color theme</div>
+            <div className="mt-1 text-xs text-[var(--muted)]">F1 neutral or a current team palette</div>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {options.map((option) => {
+              const selected = option.id === active.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(option.id);
+                    setIsOpen(false);
+                  }}
+                  className={`theme-option flex items-center gap-2.5 border px-2.5 py-2.5 text-left ${selected ? "border-[var(--team-accent)] bg-[var(--team-accent-wash)]" : "border-transparent hover:border-[var(--line)] hover:bg-[var(--surface)]"}`}
+                >
+                  <span className="h-7 w-1.5 shrink-0 rounded-full" style={{ background: `#${option.accent}` }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-semibold text-[var(--foreground)]">{option.label}</span>
+                    <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.13em] text-[var(--muted)]">{option.detail}</span>
+                  </span>
+                  {selected ? <Check size={13} className="shrink-0 text-[var(--team-accent)]" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function Panel({
@@ -2612,10 +2706,10 @@ function LiveActionDock({
                   style={{
                     borderColor: active
                       ? rgba(driver.teamColor, 0.38)
-                      : "rgba(20,24,31,0.08)",
+                      : "var(--line)",
                     background: active
-                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.18)}, rgba(255,255,255,0.84))`
-                      : "rgba(255,255,255,0.7)",
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.18)}, var(--surface-strong))`
+                      : "var(--surface)",
                     boxShadow: active
                       ? `0 12px 22px ${rgba(driver.teamColor, 0.12)}`
                       : "0 8px 16px rgba(17,21,29,0.035)",
@@ -2626,7 +2720,7 @@ function LiveActionDock({
                     style={{
                       background: active
                         ? `linear-gradient(180deg, #${driver.teamColor}, ${rgba(driver.teamColor, 0.2)})`
-                        : "rgba(17,21,29,0.08)",
+                        : "var(--line)",
                     }}
                   />
                   <div className="flex w-8 flex-col items-center justify-center">
@@ -3051,7 +3145,7 @@ function DashboardTabs({
               onClick={() => onChange(tab.id)}
               className={`group flex min-w-[112px] items-center justify-center gap-2 px-3 py-2.5 text-left transition lg:min-w-0 ${FOCUS_RING} ${
                 active
-                  ? "bg-[var(--foreground)] text-[var(--background)]"
+                  ? "bg-[var(--team-accent)] text-[var(--theme-on-accent)]"
                   : "text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--foreground)]"
               }`}
             >
@@ -3124,10 +3218,10 @@ function TimingBoardPanel({
                   aria-pressed={active}
                   className={`grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(140px,1fr)_110px_110px_120px] items-center gap-2 rounded-[14px] border px-3 py-3 text-left transition hover:-translate-y-0.5 ${FOCUS_RING}`}
                   style={{
-                    borderColor: active ? rgba(driver.teamColor, 0.4) : "rgba(17,21,29,0.08)",
+                    borderColor: active ? rgba(driver.teamColor, 0.4) : "var(--line)",
                     background: active
-                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.16)}, rgba(255,255,255,0.82))`
-                      : "rgba(255,255,255,0.68)",
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.16)}, var(--surface-strong))`
+                      : "var(--surface)",
                   }}
                 >
                   <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
@@ -3865,6 +3959,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           scrubIndex?: number;
           isTelemetryPlaying?: boolean;
           themeMode?: "system" | "light" | "dark";
+          visualTheme?: string;
         };
 
         dispatch(
@@ -3883,6 +3978,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 ? parsed.isTelemetryPlaying
                 : undefined,
             themeMode: parsed.themeMode,
+            visualTheme:
+              typeof parsed.visualTheme === "string" ? parsed.visualTheme : undefined,
           }),
         );
       } catch {
@@ -3916,6 +4013,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           scrubIndex,
           isTelemetryPlaying,
           themeMode: ui.themeMode,
+          visualTheme: ui.visualTheme,
         }),
       );
     } catch {
@@ -3928,6 +4026,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     scrubIndex,
     selectedDriverId,
     ui.themeMode,
+    ui.visualTheme,
     ui.watchlist,
   ]);
 
@@ -3973,8 +4072,39 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const activeTelemetrySample =
     data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
 
-  const accent = selectedDriver?.teamColor ?? "E10600";
+  const visualThemeOptions = useMemo<VisualThemeOption[]>(() => {
+    const teams = new Map<string, { accent: string; drivers: string[] }>();
+    data.standings.forEach((driver) => {
+      const current = teams.get(driver.teamName) ?? {
+        accent: driver.teamColor,
+        drivers: [],
+      };
+      if (!current.drivers.includes(driver.abbreviation)) {
+        current.drivers.push(driver.abbreviation);
+      }
+      teams.set(driver.teamName, current);
+    });
+
+    return [
+      { id: "f1", label: "F1", accent: "E10600", detail: "Championship" },
+      ...Array.from(teams.entries()).map(([teamName, team]) => ({
+        id: `team:${teamName}`,
+        label: teamName,
+        accent: team.accent,
+        detail: team.drivers.join(" / "),
+      })),
+    ];
+  }, [data.standings]);
+  const activeVisualTheme =
+    visualThemeOptions.find((theme) => theme.id === ui.visualTheme) ??
+    visualThemeOptions[0];
+  const accent = activeVisualTheme?.accent ?? "E10600";
   const themeStyle = useMemo(() => buildThemeStyle(accent), [accent]);
+
+  const changeVisualTheme = (themeId: string) => {
+    dispatch(setVisualTheme(themeId));
+    logDashboardInteraction("visual_theme_change", themeId);
+  };
 
   const selectDriver = (driverId: string) => {
     dispatch(setSelectedDriverId(driverId));
@@ -4105,11 +4235,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   return (
     <main
       style={themeStyle}
-      className="mx-auto flex min-h-screen max-w-[1540px] flex-col gap-4 px-3 py-3 sm:gap-5 sm:px-6 sm:py-5 lg:px-8 lg:py-6"
+      className="app-shell mx-auto flex min-h-screen max-w-[1540px] flex-col gap-4 px-3 py-3 sm:gap-5 sm:px-6 sm:py-5 lg:px-8 lg:py-6"
     >
       <header className="app-header flex items-center justify-between gap-4 border-b border-[var(--line)] pb-3">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-          <div className="grid h-9 w-9 shrink-0 place-items-center bg-[#e10600] text-[11px] font-black tracking-[-0.04em] text-white sm:h-10 sm:w-10">
+          <div className="grid h-9 w-9 shrink-0 place-items-center bg-[var(--team-accent)] text-[11px] font-black tracking-[-0.04em] text-[var(--theme-on-accent)] sm:h-10 sm:w-10">
             P1
           </div>
           <div className="min-w-0">
@@ -4127,6 +4257,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <ThemePicker
+            options={visualThemeOptions}
+            value={activeVisualTheme?.id ?? "f1"}
+            onChange={changeVisualTheme}
+          />
           <button
             type="button"
             onClick={() => dispatch(cycleThemeMode())}
