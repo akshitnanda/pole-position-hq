@@ -9,6 +9,7 @@ type DashboardUiState = {
   scrubIndex: number;
   isTelemetryPlaying: boolean;
   themeMode: ThemeMode;
+  visualTheme: string;
 };
 
 const initialState: DashboardUiState = {
@@ -18,6 +19,7 @@ const initialState: DashboardUiState = {
   scrubIndex: 0,
   isTelemetryPlaying: true,
   themeMode: "system",
+  visualTheme: "f1",
 };
 
 const dashboardUiSlice = createSlice({
@@ -48,6 +50,9 @@ const dashboardUiSlice = createSlice({
     setTelemetryPlaying(state, action: PayloadAction<boolean>) {
       state.isTelemetryPlaying = action.payload;
     },
+    setVisualTheme(state, action: PayloadAction<string>) {
+      state.visualTheme = action.payload;
+    },
     cycleThemeMode(state) {
       state.themeMode =
         state.themeMode === "system"
@@ -66,6 +71,7 @@ export const {
   setScrubIndex,
   setSelectedDriverId,
   setTelemetryPlaying,
+  setVisualTheme,
   toggleWatchlist,
 } = dashboardUiSlice.actions;
 
