@@ -8,16 +8,16 @@
   --f1-glass-border: rgba(255, 255, 255, 0.1);
   --f1-card-blur: 12px;
   --f1-heading-font: "Formula 1 Display", "Titillium Web", "Racing Sans One", "Space Grotesk", "Avenir Next", sans-serif;
-  --background: #f2f4f7;
-  --foreground: #11151d;
-  --panel: rgba(255, 255, 255, 0.74);
-  --panel-strong: rgba(255, 255, 255, 0.9);
-  --muted: rgba(65, 74, 90, 0.74);
-  --line: rgba(17, 21, 29, 0.08);
+  --background: #f4f3ef;
+  --foreground: #111214;
+  --panel: rgba(251, 250, 247, 0.9);
+  --panel-strong: rgba(253, 252, 249, 0.96);
+  --muted: rgba(57, 60, 65, 0.7);
+  --line: rgba(17, 18, 20, 0.12);
   --accent: #e10600;
   --accent-soft: #ff6a61;
   --track: #151922;
-  --shadow: 0 28px 70px rgba(17, 21, 29, 0.1);
+  --shadow: 0 18px 48px rgba(17, 18, 20, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -81,9 +81,8 @@ body::after {
 
 body::before {
   background:
-    linear-gradient(135deg, rgba(225, 6, 0, 0.08), transparent 32%),
-    linear-gradient(225deg, rgba(0, 161, 155, 0.075), transparent 34%),
-    linear-gradient(180deg, #f9fafc 0%, #f1f4f8 50%, #e8ecf2 100%);
+    linear-gradient(135deg, rgba(225, 6, 0, 0.045), transparent 28%),
+    linear-gradient(180deg, #faf9f6 0%, #f4f3ef 46%, #eceae5 100%);
 }
 
 :root[data-theme="dark"] body::before {
@@ -104,11 +103,11 @@ body::before {
 
 body::after {
   z-index: -1;
-  opacity: 0.24;
+  opacity: 0.16;
   background-image:
     linear-gradient(rgba(17, 21, 29, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(17, 21, 29, 0.03) 1px, transparent 1px);
-  background-size: 56px 56px;
+  background-size: 72px 72px;
   mask-image: radial-gradient(circle at center, black, transparent 90%);
 }
 
@@ -126,7 +125,7 @@ h3,
 .display-type {
   font-family: var(--f1-heading-font);
   font-size: clamp(1.05rem, 1.5vw, 1.9rem);
-  letter-spacing: 0;
+  letter-spacing: -0.025em;
 }
 
 a {
@@ -140,17 +139,12 @@ a {
 }
 
 .glass-panel {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.9) 0%,
-    rgba(250, 252, 255, 0.84) 54%,
-    rgba(245, 247, 251, 0.78) 100%
-  );
+  background: var(--panel);
   border-radius: 14px;
   border: 1px solid var(--line);
   box-shadow:
-    0 16px 34px rgba(17, 21, 29, 0.065),
-    inset 0 1px 0 rgba(255, 255, 255, 0.46);
+    0 8px 22px rgba(17, 18, 20, 0.045),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(var(--f1-card-blur));
   transition:
     border-color 180ms ease,
@@ -159,7 +153,7 @@ a {
 }
 
 .glass-pill {
-  background: rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.52);
   border-radius: 999px;
   border: 1px solid rgba(17, 21, 29, 0.08);
   backdrop-filter: blur(var(--f1-card-blur));
@@ -202,16 +196,10 @@ a {
 }
 
 .minimal-card {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.78) 0%,
-    rgba(255, 255, 255, 0.68) 100%
-  );
+  background: rgba(255, 255, 255, 0.5);
   border-radius: 8px;
   border: 1px solid rgba(17, 21, 29, 0.08);
-  box-shadow:
-    0 10px 24px rgba(17, 21, 29, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.36);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
   backdrop-filter: blur(var(--f1-card-blur));
   transition:
     border-color 180ms ease,
@@ -221,10 +209,10 @@ a {
 
 .glass-panel:hover,
 .minimal-card:hover {
-  border-color: var(--team-accent, var(--f1-red));
+  border-color: color-mix(in srgb, var(--team-accent, var(--f1-red)) 38%, var(--line));
   box-shadow:
-    0 18px 42px rgba(17, 21, 29, 0.1),
-    0 0 0 1px color-mix(in srgb, var(--team-accent, var(--f1-red)) 30%, transparent);
+    0 12px 28px rgba(17, 21, 29, 0.075),
+    0 0 0 1px color-mix(in srgb, var(--team-accent, var(--f1-red)) 16%, transparent);
 }
 
 .f1-suite {
@@ -471,5 +459,120 @@ button {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* Product shell: a restrained race-operations layer above the individual widgets. */
+.app-header {
+  min-height: 52px;
+}
+
+.utility-button {
+  background: color-mix(in srgb, var(--panel-strong) 88%, transparent);
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.utility-button:hover {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--foreground) 24%, transparent);
+  background: var(--panel-strong);
+}
+
+.dashboard-tabs {
+  border-radius: 8px;
+}
+
+.dashboard-tabs button {
+  border-radius: 4px;
+}
+
+.race-hero {
+  background:
+    linear-gradient(118deg, var(--team-accent-wash), transparent 42%),
+    var(--panel-strong);
+}
+
+.race-hero__rail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--team-accent, var(--f1-red));
+}
+
+.race-hero__primary {
+  position: relative;
+}
+
+.race-hero__primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image: linear-gradient(90deg, transparent 97%, var(--line) 97%);
+  background-size: 84px 100%;
+  mask-image: linear-gradient(90deg, black, transparent 75%);
+}
+
+.race-hero__schedule {
+  position: relative;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.race-title {
+  max-width: 14ch;
+  color: var(--foreground);
+  text-wrap: balance;
+}
+
+.status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 24px;
+  padding: 0 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel-strong) 78%, transparent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.countdown-grid {
+  border-block: 1px solid var(--line);
+}
+
+.countdown-cell {
+  padding: 0.75rem 0.6rem;
+  text-align: center;
+  border-left: 1px solid var(--line);
+}
+
+.countdown-cell:first-child {
+  border-left: 0;
+}
+
+@media (min-width: 1024px) {
+  .race-hero__schedule {
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 639px) {
+  .race-hero__primary::after {
+    display: none;
+  }
+
+  .countdown-cell {
+    padding-inline: 0.35rem;
   }
 }

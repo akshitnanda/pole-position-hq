@@ -282,7 +282,7 @@ function Panel({
 }) {
   return (
     <section
-      className={`glass-panel rounded-[22px] p-3.5 sm:rounded-[28px] sm:p-5 ${className ?? ""}`}
+      className={`glass-panel rounded-[14px] p-3.5 sm:p-5 ${className ?? ""}`}
       style={tint ? { ["--team-tint" as string]: tint } : undefined}
     >
       {children}
@@ -1513,147 +1513,87 @@ function HeaderHero({
       ]
     : [];
   const nextEvent = dashboard.nextSession
-    ? `${dashboard.nextSession.circuitName} ${dashboard.nextSession.sessionName}`
+    ? dashboard.nextSession.circuitName
     : "Awaiting next session";
 
   return (
-    <Panel
-      className="signal-sheen relative overflow-hidden p-3 sm:p-4"
-      tint="var(--team-accent-soft)"
-    >
-      <div className="race-stripe pointer-events-none absolute inset-x-3 top-0 h-1 rounded-b-full sm:inset-x-4" />
-      <div className="pointer-events-none absolute -right-8 -top-12 h-32 w-32 rounded-full bg-[radial-gradient(circle,var(--team-accent-soft),transparent_68%)] opacity-70" />
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.62fr)] lg:items-stretch">
-        <div className="minimal-card team-tint relative overflow-hidden rounded-[20px] px-4 py-3.5 sm:rounded-[24px] sm:px-5 sm:py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full bg-[#e10600] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white shadow-[0_10px_22px_rgba(225,6,0,0.2)]">
-              <Sparkles size={13} />
-              Race control
-            </span>
-            <span
-              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] ${scheduleTone.className}`}
-            >
-              {scheduleTone.label}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-white/72 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--team-accent)] pulse-dot" />
-              {freshness}
+    <Panel className="race-hero relative overflow-hidden !p-0" tint="var(--team-accent-soft)">
+      <div className="race-hero__rail" />
+      <div className="grid lg:grid-cols-[minmax(0,1.48fr)_minmax(300px,0.52fr)]">
+        <div className="race-hero__primary px-5 py-5 sm:px-7 sm:py-7 lg:px-9 lg:py-8">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="eyebrow text-[var(--foreground)]">Next session</span>
+            <span className={`status-label ${scheduleTone.className}`}>{scheduleTone.label}</span>
+            <span className="status-label">
+              <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-[var(--team-accent)]" />
+              Updated {freshness}
             </span>
           </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="mt-6 grid gap-7 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
             <div className="min-w-0">
-              <div className="eyebrow">Next session</div>
-              <h1 className="section-title mt-1 truncate text-[1.65rem] font-semibold sm:text-[2.35rem] lg:text-[2.65rem]">
+              <div className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[var(--team-accent)]">
+                {dashboard.nextSession?.sessionName ?? "Schedule pending"}
+              </div>
+              <h1 className="race-title mt-2 text-[clamp(2.25rem,5vw,5.4rem)] font-semibold leading-[0.86] tracking-[-0.055em]">
                 {nextEvent}
               </h1>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-[var(--muted)] sm:text-[13px]">
+              <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--muted)]">
                 {dashboard.nextSession ? (
                   <>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Flag size={13} />
-                      {dashboard.nextSession.location}, {dashboard.nextSession.countryName}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Clock3 size={13} />
-                      {formatSessionDate(dashboard.nextSession.dateStart)}
-                    </span>
+                    <span className="inline-flex items-center gap-2"><Flag size={14} />{dashboard.nextSession.location}, {dashboard.nextSession.countryName}</span>
+                    <span className="inline-flex items-center gap-2"><Clock3 size={14} />{formatSessionDate(dashboard.nextSession.dateStart)}</span>
                   </>
-                ) : (
-                  <span>Schedule feed is standing by for the next published weekend.</span>
-                )}
+                ) : <span>Standing by for the next published weekend.</span>}
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-1.5 sm:min-w-[280px]">
-              {countdownParts.length ? (
-                countdownParts.map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="rounded-[15px] border border-black/8 bg-white/78 px-2.5 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
-                  >
-                    <div className="telemetry-text text-xl font-semibold leading-none text-[var(--foreground)] sm:text-2xl">
-                      {String(value).padStart(2, "0")}
-                    </div>
-                    <div className="mt-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                      {label}
-                    </div>
+            <div className="min-w-0 sm:min-w-[270px]">
+              <div className="eyebrow mb-2">Time to session</div>
+              <div className="countdown-grid grid grid-cols-4">
+                {countdownParts.length ? countdownParts.map(([label, value]) => (
+                  <div key={label} className="countdown-cell">
+                    <div className="telemetry-text text-[clamp(1.45rem,3vw,2.25rem)] font-semibold leading-none">{String(value).padStart(2, "0")}</div>
+                    <div className="mt-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">{label}</div>
                   </div>
-                ))
-              ) : (
-                <div
-                  className="col-span-4 rounded-[15px] border border-black/8 bg-white/72 px-3 py-3 text-xs text-[var(--muted)]"
-                >
-                  Countdown appears when timing is available.
-                </div>
-              )}
+                )) : <div className="col-span-4 py-3 text-xs text-[var(--muted)]">Timing pending</div>}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="minimal-card rounded-[20px] p-3.5">
-            <div className="flex items-center justify-between gap-3">
+          <div className="mt-7 flex items-center justify-between gap-4 border-t border-[var(--line)] pt-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="h-8 w-1 shrink-0 rounded-full bg-[var(--team-accent)]" />
               <div className="min-w-0">
-                <div className="eyebrow">Selected driver</div>
-                <div className="section-title mt-1 truncate text-lg font-semibold">
-                  {selectedDriver?.fullName ?? "Pick from timing"}
-                </div>
-                <div className="truncate text-xs text-[var(--muted)]">
-                  {selectedDriver
-                    ? `${selectedDriver.teamName} | ${selectedDriver.points} pts`
-                    : "Driver rail controls the accent and telemetry focus."}
+                <div className="eyebrow">Driver focus</div>
+                <div className="mt-1 truncate text-sm font-semibold">
+                  {selectedDriver?.fullName ?? "Select a driver"}
+                  <span className="ml-2 font-normal text-[var(--muted)]">{selectedDriver ? `${selectedDriver.teamName} · ${selectedDriver.points} pts` : ""}</span>
                 </div>
               </div>
-              <div
-                className="telemetry-text rounded-[14px] px-3 py-2 text-sm font-semibold"
-                style={{
-                  background: selectedDriver
-                    ? rgba(selectedDriver.teamColor, 0.13)
-                    : "rgba(17,21,29,0.06)",
-                  color: selectedDriver ? `#${selectedDriver.teamColor}` : "var(--foreground)",
-                }}
-              >
-                {selectedDriver?.abbreviation ?? "--"}
-              </div>
             </div>
-          </div>
-
-          <div className="minimal-card rounded-[20px] p-3.5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="eyebrow">Weekend stack</div>
-                <div className="mt-1 text-xs text-[var(--muted)]">
-                  Local / track sync stays compact.
-                </div>
-              </div>
-              <FunBadge label="30s refresh" tone="dark" />
-            </div>
-
-            <div className="mt-3 grid gap-2">
-              {sessionStack.length ? (
-                sessionStack.map((session) => (
-                  <div
-                    key={session.sessionKey}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-2"
-                  >
-                    <span className="truncate text-[13px] font-semibold text-[var(--foreground)]">
-                      {session.sessionName}
-                    </span>
-                    <span className="telemetry-text text-[11px] text-[var(--muted)]">
-                      {formatTrackDate(session.dateStart, session.gmtOffset)}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-[14px] border border-black/6 bg-white/70 px-3 py-2 text-xs text-[var(--muted)]">
-                  Upcoming sessions will appear here.
-                </div>
-              )}
-            </div>
+            <span className="telemetry-text text-lg font-bold" style={{ color: selectedDriver ? `#${selectedDriver.teamColor}` : undefined }}>{selectedDriver?.abbreviation ?? "--"}</span>
           </div>
         </div>
+
+        <aside className="race-hero__schedule px-5 py-5 sm:px-7 lg:px-6 lg:py-8">
+          <div className="flex items-end justify-between gap-3 border-b border-[var(--line)] pb-4">
+            <div><div className="eyebrow">Weekend schedule</div><div className="mt-1 text-sm font-semibold">Track time</div></div>
+            <span className="telemetry-text text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">Local</span>
+          </div>
+          <div className="divide-y divide-[var(--line)]">
+            {sessionStack.length ? sessionStack.map((session, index) => (
+              <div key={session.sessionKey} className="grid grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-3 py-4">
+                <span className="telemetry-text text-[10px] text-[var(--muted)]">0{index + 1}</span>
+                <span className="truncate text-[13px] font-semibold">{session.sessionName}</span>
+                <span className="telemetry-text text-[11px] text-[var(--muted)]">{formatTrackDate(session.dateStart, session.gmtOffset)}</span>
+              </div>
+            )) : <div className="py-4 text-xs text-[var(--muted)]">Upcoming sessions will appear here.</div>}
+          </div>
+          <div className="mt-5 flex items-center justify-between border-t border-[var(--line)] pt-4 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+            <span>Auto refresh</span><span className="telemetry-text text-[var(--foreground)]">30 SEC</span>
+          </div>
+        </aside>
       </div>
     </Panel>
   );
@@ -3092,13 +3032,13 @@ function DashboardTabs({
   onChange: (tab: DashboardTab) => void;
 }) {
   return (
-    <div className="glass-panel sticky top-2 z-30 rounded-[18px] p-1.5 shadow-[0_18px_36px_rgba(17,21,29,0.09)] sm:p-2">
+    <div className="dashboard-tabs sticky top-2 z-30 border border-[var(--line)] bg-[var(--panel-strong)] p-1.5 shadow-[0_14px_34px_rgba(17,21,29,0.08)] backdrop-blur-xl">
       <div
-        className="flex gap-1 overflow-x-auto hide-scrollbar sm:grid sm:grid-cols-4 lg:grid-cols-8"
+        className="flex gap-0.5 overflow-x-auto hide-scrollbar lg:grid lg:grid-cols-8"
         role="tablist"
         aria-label="Dashboard sections"
       >
-        {DASHBOARD_TABS.map((tab) => {
+        {DASHBOARD_TABS.map((tab, index) => {
           const active = activeTab === tab.id;
           const Icon = tab.icon;
 
@@ -3109,25 +3049,15 @@ function DashboardTabs({
               role="tab"
               aria-selected={active}
               onClick={() => onChange(tab.id)}
-              className={`grid min-w-[132px] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[12px] px-3 py-2.5 text-left transition sm:min-w-0 ${FOCUS_RING} ${
+              className={`group flex min-w-[112px] items-center justify-center gap-2 px-3 py-2.5 text-left transition lg:min-w-0 ${FOCUS_RING} ${
                 active
-                  ? "bg-[var(--team-accent)] text-white shadow-[0_10px_20px_rgba(17,21,29,0.12)]"
-                  : "text-[var(--muted)] hover:bg-white/68 hover:text-[var(--foreground)]"
+                  ? "bg-[var(--foreground)] text-[var(--background)]"
+                  : "text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--foreground)]"
               }`}
             >
-              <Icon size={16} aria-hidden="true" />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold leading-tight">
-                  {tab.label}
-                </span>
-                <span
-                  className={`mt-0.5 block truncate text-[10px] uppercase tracking-[0.14em] ${
-                    active ? "text-white/72" : "text-[var(--muted)]"
-                  }`}
-                >
-                  {tab.description}
-                </span>
-              </span>
+              <span className={`telemetry-text text-[9px] ${active ? "opacity-60" : "opacity-45"}`}>{String(index + 1).padStart(2, "0")}</span>
+              <Icon size={14} aria-hidden="true" />
+              <span className="truncate text-xs font-semibold">{tab.label}</span>
             </button>
           );
         })}
@@ -4175,36 +4105,48 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   return (
     <main
       style={themeStyle}
-      className="mx-auto flex min-h-screen max-w-[1480px] flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-6 sm:py-5 lg:px-8 lg:py-7"
+      className="mx-auto flex min-h-screen max-w-[1540px] flex-col gap-4 px-3 py-3 sm:gap-5 sm:px-6 sm:py-5 lg:px-8 lg:py-6"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-[11px]">
-          <span className="pulse-dot h-2 w-2 rounded-full bg-[var(--team-accent)]" />
-          {data.liveTiming.connection === "offline"
-            ? "offline-ready surface"
-            : `${data.liveTiming.connection} stream`}
+      <header className="app-header flex items-center justify-between gap-4 border-b border-[var(--line)] pb-3">
+        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+          <div className="grid h-9 w-9 shrink-0 place-items-center bg-[#e10600] text-[11px] font-black tracking-[-0.04em] text-white sm:h-10 sm:w-10">
+            P1
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-bold uppercase tracking-[0.12em] text-[var(--foreground)] sm:text-sm">
+              Pole Position
+            </div>
+            <div className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] sm:text-[10px]">
+              Race intelligence / {data.season}
+            </div>
+          </div>
+          <div className="hidden h-7 w-px bg-[var(--line)] sm:block" />
+          <div className="hidden items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)] sm:flex">
+            <span className={`h-1.5 w-1.5 rounded-full ${data.liveTiming.connection === "offline" ? "bg-[#d5a125]" : "bg-[#00a76f] pulse-dot"}`} />
+            {data.liveTiming.connection === "offline" ? "Snapshot mode" : `${data.liveTiming.connection} live`}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => dispatch(cycleThemeMode())}
             aria-label="Cycle color mode"
-            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
+            className={`utility-button inline-flex h-9 items-center gap-2 border border-[var(--line)] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)] ${FOCUS_RING}`}
           >
             <SunMoon size={14} />
-            {ui.themeMode}
+            <span className="hidden sm:inline">{ui.themeMode}</span>
           </button>
           <button
             type="button"
             onClick={() => void refetch()}
             aria-label="Refresh dashboard data"
-            className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-[var(--muted)] sm:text-xs sm:tracking-[0.18em] ${FOCUS_RING}`}
+            className={`utility-button inline-flex h-9 items-center gap-2 border border-[var(--line)] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)] ${FOCUS_RING}`}
           >
             <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
-            {isFetching ? "Refreshing" : "Refresh now"}
+            <span className="hidden sm:inline">{isFetching ? "Refreshing" : "Refresh"}</span>
           </button>
         </div>
-      </div>
+      </header>
 
       {hasMounted && (!isOnline || error) ? (
         <div className="glass-panel rounded-[20px] px-4 py-3 text-sm text-[var(--foreground)]">
@@ -4240,15 +4182,15 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "overview" ? (
         <div className="grid gap-4 sm:gap-5">
+          <WidgetBoundary label="Race control">
+            <RaceControlPanel raceControl={data.raceControl} />
+          </WidgetBoundary>
+
           <BriefingPanel
             dashboard={data}
             selectedDriver={selectedDriver}
             onNavigate={setActiveTab}
           />
-
-          <WidgetBoundary label="Race control">
-            <RaceControlPanel raceControl={data.raceControl} />
-          </WidgetBoundary>
 
           <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
             <div className="grid gap-4 sm:gap-5">
