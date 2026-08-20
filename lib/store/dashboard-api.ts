@@ -36,11 +36,12 @@ export const dashboardApi = createApi({
                   draft.raceControl = frame.raceControl;
                 }
 
-                draft.sources.telemetry.status = "live";
+                draft.sources.telemetry.status =
+                  connection === "websocket" ? "live" : "cached";
                 draft.sources.telemetry.note =
                   connection === "websocket"
                     ? "Live Timing Protocol frames are streaming through the configured WebSocket."
-                    : "Live Timing Protocol frames are streaming through the local EventSource fallback.";
+                    : "Archived telemetry is playing through a local transport; this is not a live upstream feed.";
               });
 
               if (typeof frame.latencyMs === "number") {
