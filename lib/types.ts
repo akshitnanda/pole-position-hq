@@ -145,7 +145,7 @@ export type RaceIntelligence = {
   sourcePulse: SourcePulse[];
 };
 
-export type RaceControlFlag = "Green" | "Yellow" | "Red" | "VSC" | "SC";
+export type RaceControlFlag = "Idle" | "Green" | "Yellow" | "Red" | "VSC" | "SC";
 
 export type RaceControlEvent = {
   id: string;
@@ -178,7 +178,7 @@ export type LiveTimingState = {
   latencyMs: number;
 };
 
-export type DataFeedStatus = "live" | "cached" | "fallback" | "empty";
+export type DataFeedStatus = "live" | "cached" | "simulated" | "fallback" | "empty";
 
 export type DashboardFeedMeta = {
   label: string;

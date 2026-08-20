@@ -704,7 +704,11 @@ function getFeedTone(status: DashboardData["sources"]["schedule"]["status"]) {
   }
 
   if (status === "cached") {
-    return { label: "Cached", className: "text-[#0066cc] bg-[#0066cc]/10 border-[#0066cc]/20" };
+    return { label: "Snapshot", className: "text-[#3976c3] bg-[#3976c3]/10 border-[#3976c3]/25" };
+  }
+
+  if (status === "simulated") {
+    return { label: "Simulation", className: "text-[#a86400] bg-[#d98b00]/12 border-[#d98b00]/25" };
   }
 
   if (status === "fallback") {
@@ -1192,8 +1196,6 @@ function buildConstructorStandings(drivers: DriverInsight[]) {
       teamColor: string;
       points: number;
       drivers: string[];
-      podiums: number;
-      wins: number;
     }
   >();
 
@@ -1203,14 +1205,10 @@ function buildConstructorStandings(drivers: DriverInsight[]) {
       teamColor: driver.teamColor,
       points: 0,
       drivers: [],
-      podiums: 0,
-      wins: 0,
     };
 
     current.points += driver.points;
     current.drivers.push(driver.abbreviation);
-    current.podiums += driver.totalPodiums;
-    current.wins += driver.totalRaceWins;
     teams.set(driver.teamName, current);
   });
 
@@ -1935,7 +1933,9 @@ function TelemetryExperiencePanel({
             ) : null}
           </div>
           <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
-            {driverLabel ? `${driverLabel} live trace` : "Telemetry pending"}
+            {driverLabel
+              ? `${driverLabel} ${sourceMeta.status === "live" ? "live trace" : "lap replay"}`
+              : "Telemetry pending"}
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
             {session
@@ -2400,7 +2400,7 @@ function LiveActionDock({
                   Track map
                 </span>
                 <span className="text-[10px] uppercase tracking-[0.16em] text-white/48">
-                  current event
+                  {liveTiming.connection === "websocket" ? "current event" : "session replay"}
                 </span>
               </div>
               <div className="mt-2 text-base font-semibold text-white">{circuitName}</div>
@@ -2426,7 +2426,7 @@ function LiveActionDock({
                 </span>
               ) : null}
               <span className="rounded-full border border-white/12 bg-white/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">
-                {liveTiming.connection}
+                {liveTiming.connection === "websocket" ? "Live" : liveTiming.connection === "eventsource" ? "Replay" : "Offline"}
               </span>
             </div>
           </div>
@@ -2441,7 +2441,7 @@ function LiveActionDock({
             </div>
             <div className="rounded-[14px] border border-white/10 bg-white/[0.07] px-3 py-2">
               <div className="text-[10px] uppercase tracking-[0.16em] text-white/46">
-                Top gear
+                High-gear time
               </div>
               <div className="telemetry-text mt-1 text-sm font-semibold text-white">
                 {insights ? `${insights.topGearPct.toFixed(0)}%` : "--"}
@@ -2849,15 +2849,18 @@ function FantasyActionPanel({
   };
 
   return (
-    <Panel>
+    <Panel className={fantasy.source === "fallback" ? "simulation-panel" : undefined}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="eyebrow">Fantasy hub</div>
-            <FunBadge label="Market heat" tone="accent" />
+            <FunBadge
+              label={fantasy.source === "official" ? "Official game" : "Simulation"}
+              tone={fantasy.source === "official" ? "accent" : "dark"}
+            />
           </div>
           <div className="section-title mt-2 text-base font-semibold sm:text-xl">
-            Value picks and risers
+            {fantasy.source === "official" ? "Value picks and risers" : "Fantasy sandbox"}
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
             {fantasy.note}
@@ -2877,7 +2880,9 @@ function FantasyActionPanel({
         >
           {feedTone.label}
         </span>
-        <span className="text-xs text-[var(--muted)]">{sourceMeta.note}</span>
+        {sourceMeta.note !== fantasy.note ? (
+          <span className="text-xs text-[var(--muted)]">{sourceMeta.note}</span>
+        ) : null}
       </div>
 
       {builderOpen ? (
@@ -2958,7 +2963,9 @@ function FantasyActionPanel({
       <div className="mt-4 grid gap-3.5 sm:gap-4 xl:grid-cols-2">
         <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
           <div className="mb-3 flex items-center justify-between">
-            <div className="section-title text-sm font-semibold">Top value</div>
+            <div className="section-title text-sm font-semibold">
+              {fantasy.source === "official" ? "Top value" : "Estimated value"}
+            </div>
             <Trophy size={16} className="text-[var(--muted)]" />
           </div>
           <div className="grid gap-2">
@@ -3004,7 +3011,9 @@ function FantasyActionPanel({
 
         <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
           <div className="mb-3 flex items-center justify-between">
-            <div className="section-title text-sm font-semibold">Price risers</div>
+            <div className="section-title text-sm font-semibold">
+              {fantasy.source === "official" ? "Price risers" : "Modeled movers"}
+            </div>
             <ArrowUpRight size={16} className="text-[var(--muted)]" />
           </div>
           <div className="grid gap-2">
@@ -3032,7 +3041,9 @@ function FantasyActionPanel({
                       {entry.trend > 0 ? "+" : ""}
                       {entry.trend.toFixed(2)}M
                     </div>
-                    <div className="text-xs text-[var(--muted)]">market delta</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {fantasy.source === "official" ? "market delta" : "model score"}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -3065,6 +3076,7 @@ function RaceControlPanel({
   const [initialNow] = useState(() => Date.now());
   const countdown = useCountdown(raceControl.countdownEndsAt, initialNow);
   const flagTone: Record<DashboardData["raceControl"]["flag"], string> = {
+    Idle: "bg-[#697386]",
     Green: "bg-[#00a76f]",
     Yellow: "bg-[#d5a125]",
     Red: "bg-[#e10600]",
@@ -3097,7 +3109,7 @@ function RaceControlPanel({
       </div>
 
       <div className="mt-4 grid gap-2">
-        {raceControl.events.map((event) => (
+        {raceControl.events.length ? raceControl.events.map((event) => (
           <div
             key={event.id}
             className="grid gap-3 rounded-[14px] border border-black/6 bg-white/70 px-3 py-3 sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center"
@@ -3112,7 +3124,11 @@ function RaceControlPanel({
               {event.type}
             </span>
           </div>
-        ))}
+        )) : (
+          <div className="rounded-[14px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-3 py-4 text-sm text-[var(--muted)]">
+            Verified FIA race-control messages will appear here when a live upstream feed is available. News headlines are intentionally kept out of this channel.
+          </div>
+        )}
       </div>
     </Panel>
   );
@@ -3186,7 +3202,7 @@ function TimingBoardPanel({
             Full field order
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
-            Driver rows now expose position, points, pace signal, recent lap average, and team color in one scannable table.
+            Season positions are paired with latest completed-race pace only when a comparable lap sample exists.
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -3202,7 +3218,7 @@ function TimingBoardPanel({
             <span>Pos</span>
             <span>Driver</span>
             <span>Team</span>
-            <span>Avg lap</span>
+            <span>Replay avg</span>
             <span>Points</span>
             <span>Signal</span>
           </div>
@@ -3245,7 +3261,7 @@ function TimingBoardPanel({
                     </span>
                   </span>
                   <span className="telemetry-text text-sm text-[var(--foreground)]">
-                    {formatLapTime(driver.avgLap)}
+                    {driver.avgLap === null ? "No sample" : formatLapTime(driver.avgLap)}
                   </span>
                   <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
                     {driver.points}
@@ -3292,7 +3308,7 @@ function StatsPanel({
             Standings and form
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
-            Constructor totals, driver form, and career context grouped into a cleaner stats workspace.
+            Season constructor points and separately labeled driver career context.
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -3329,7 +3345,7 @@ function StatsPanel({
                     </span>
                   </div>
                   <div className="mt-0.5 text-xs text-[var(--muted)]">
-                    {team.drivers.join(" / ")} / {team.wins} wins / {team.podiums} podiums
+                    {team.drivers.join(" / ")} · season points only
                   </div>
                 </div>
                 <span className="telemetry-text text-sm font-semibold">{team.points} pts</span>
@@ -3735,11 +3751,11 @@ function WeekendInfoPanel({
                         {session.location}, {session.countryName}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
-                        {weather ? (
-                          <span>
-                            {weather.temperatureC}C / {weather.rainChance}% rain / {weather.summary}
-                          </span>
-                        ) : null}
+                        <span>
+                          {weather
+                            ? `${weather.temperatureC}C / ${weather.rainChance}% rain / ${weather.summary}`
+                            : "Weather source unavailable"}
+                        </span>
                         <a href={links.google} target="_blank" rel="noreferrer" className="underline underline-offset-2">
                           Google
                         </a>
@@ -4253,7 +4269,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <div className="hidden h-7 w-px bg-[var(--line)] sm:block" />
           <div className="hidden items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)] sm:flex">
             <span className={`h-1.5 w-1.5 rounded-full ${data.liveTiming.connection === "offline" ? "bg-[#d5a125]" : "bg-[#00a76f] pulse-dot"}`} />
-            {data.liveTiming.connection === "offline" ? "Snapshot mode" : `${data.liveTiming.connection} live`}
+            {data.liveTiming.connection === "websocket"
+              ? "Live upstream"
+              : data.liveTiming.connection === "eventsource"
+                ? "Replay transport"
+                : "Snapshot mode"}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

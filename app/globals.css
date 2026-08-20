@@ -519,6 +519,13 @@ button {
   border-radius: 6px;
 }
 
+.simulation-panel {
+  border-color: color-mix(in srgb, #d98b00 46%, var(--line));
+  background:
+    linear-gradient(135deg, rgba(217, 139, 0, 0.075), transparent 44%),
+    var(--panel);
+}
+
 .race-hero {
   background:
     linear-gradient(118deg, var(--team-accent-wash), transparent 42%),

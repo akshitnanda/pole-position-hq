@@ -14,6 +14,11 @@ import {
 } from "./types";
 import { XMLParser } from "fast-xml-parser";
 import { getEndpointConfig } from "./runtime-config";
+import {
+  canonicalizeConstructorName,
+  findDriverMatch,
+  formatDriverName,
+} from "./data-integrity";
 
 type OpenF1Session = {
   meeting_key: number;
@@ -164,20 +169,29 @@ function resolveHeadshotUrl(value: string | null | undefined) {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "PolePositionHQ/1.0",
-    },
-    next: { revalidate: 120 },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent": "PolePositionHQ/1.0",
+        },
+        next: { revalidate: 120 },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Request failed for ${url} with ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`Request failed for ${url} with ${response.status}`);
+      }
+
+      return response.json() as Promise<T>;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  return response.json() as Promise<T>;
+  throw lastError instanceof Error ? lastError : new Error(`Request failed for ${url}`);
 }
 
 async function fetchGraphQL<T>(query: string): Promise<T> {
@@ -768,13 +782,19 @@ function computeDriverInsights(
   openDrivers: OpenF1Driver[],
   laps: OpenF1Lap[],
 ): DriverInsight[] {
-  const driverLookup = new Map(
-    openDrivers.map((driver) => [String(driver.driver_number), driver]),
-  );
-
   return standings.map((standing) => {
     const permanentNumber = standing.driver.permanentNumber ?? "0";
-    const openDriver = driverLookup.get(permanentNumber);
+    const openDriver = findDriverMatch(
+      {
+        permanentNumber,
+        abbreviation: standing.driver.abbreviation,
+        fullName: standing.driver.fullName,
+        firstName: standing.driver.firstName,
+        lastName: standing.driver.lastName,
+      },
+      openDrivers,
+    );
+    const teamName = canonicalizeConstructorName(openDriver?.team_name);
     const driverLaps = laps
       .filter(
         (lap) =>
@@ -799,17 +819,21 @@ function computeDriverInsights(
 
     return {
       id: standing.driver.id,
-      fullName: openDriver?.full_name ?? standing.driver.fullName,
+      fullName: formatDriverName({
+        firstName: openDriver?.first_name ?? standing.driver.firstName,
+        lastName: openDriver?.last_name ?? standing.driver.lastName,
+        fullName: openDriver?.full_name ?? standing.driver.fullName,
+      }),
       firstName: openDriver?.first_name ?? standing.driver.firstName,
       lastName: openDriver?.last_name ?? standing.driver.lastName,
-      abbreviation: openDriver?.name_acronym ?? standing.driver.abbreviation,
+      abbreviation: (openDriver?.name_acronym ?? standing.driver.abbreviation).toUpperCase(),
       permanentNumber,
       standingPosition: standing.positionNumber ?? 99,
       standingText: standing.positionText,
       points: standing.points,
       championshipWon: standing.championshipWon,
-      teamName: openDriver?.team_name ?? "Scuderia Feed",
-      teamColor: normalizeTeamColor(openDriver?.team_colour),
+      teamName: teamName ?? "Constructor unavailable",
+      teamColor: teamName ? normalizeTeamColor(openDriver?.team_colour) : "697386",
       headshotUrl: resolveHeadshotUrl(openDriver?.headshot_url),
       totalRaceWins: standing.driver.totalRaceWins,
       totalPodiums: standing.driver.totalPodiums,
@@ -1152,37 +1176,64 @@ async function fetchSessions(year: number) {
 }
 
 function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight[] {
-  return openDrivers.slice(0, 24).map((driver, index) => ({
-    id: `fallback-${driver.driver_number}`,
-    fullName: driver.full_name,
-    firstName: driver.first_name,
-    lastName: driver.last_name,
-    abbreviation: driver.name_acronym,
-    permanentNumber: String(driver.driver_number),
-    standingPosition: index + 1,
-    standingText: String(index + 1),
-    points: 0,
-    championshipWon: false,
-    teamName: driver.team_name,
-    teamColor: normalizeTeamColor(driver.team_colour),
-    headshotUrl: resolveHeadshotUrl(driver.headshot_url),
-    totalRaceWins: 0,
-    totalPodiums: 0,
-    totalPolePositions: 0,
-    totalPoints: 0,
-    paceSeries: [],
-    avgLap: null,
-    sectorAverages: {
-      sector1: null,
-      sector2: null,
-      sector3: null,
-    },
-    sentiment: {
-      score: 50,
-      label: "Steady",
-      delta: 0,
-    },
-  }));
+  return openDrivers.slice(0, 24).map((driver, index) => {
+    const teamName = canonicalizeConstructorName(driver.team_name);
+    return {
+      id: `fallback-${driver.driver_number}`,
+      fullName: formatDriverName({
+        firstName: driver.first_name,
+        lastName: driver.last_name,
+        fullName: driver.full_name,
+      }),
+      firstName: driver.first_name,
+      lastName: driver.last_name,
+      abbreviation: driver.name_acronym.toUpperCase(),
+      permanentNumber: String(driver.driver_number),
+      standingPosition: index + 1,
+      standingText: String(index + 1),
+      points: 0,
+      championshipWon: false,
+      teamName: teamName ?? "Constructor unavailable",
+      teamColor: teamName ? normalizeTeamColor(driver.team_colour) : "697386",
+      headshotUrl: resolveHeadshotUrl(driver.headshot_url),
+      totalRaceWins: 0,
+      totalPodiums: 0,
+      totalPolePositions: 0,
+      totalPoints: 0,
+      paceSeries: [],
+      avgLap: null,
+      sectorAverages: {
+        sector1: null,
+        sector2: null,
+        sector3: null,
+      },
+      sentiment: {
+        score: 50,
+        label: "Steady",
+        delta: 0,
+      },
+    };
+  });
+}
+
+async function fetchOpenDriversForContext(sessionKey: number | null) {
+  const attempts: Array<number | "latest"> = ["latest"];
+  if (sessionKey !== null) {
+    attempts.push(sessionKey);
+  }
+
+  for (const attempt of attempts) {
+    try {
+      const drivers = await fetchOpenDrivers(attempt);
+      if (drivers.length) {
+        return drivers;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
 }
 
 function buildFallbackActivity(
@@ -1396,85 +1447,18 @@ function buildRaceIntelligence(
 }
 
 function buildRaceControl(
-  activityItems: ActivityItem[],
   nextSession: OpenF1Session | null,
 ): DashboardData["raceControl"] {
-  const incident = activityItems.find((item) =>
-    /\b(red flag|yellow|safety car|vsc|crash|incident|stopped)\b/i.test(
-      `${item.title} ${item.summary}`,
-    ),
-  );
-  const lowered = `${incident?.title ?? ""} ${incident?.summary ?? ""}`.toLowerCase();
-  const flag =
-    lowered.includes("red flag")
-      ? "Red"
-      : lowered.includes("safety car")
-        ? "SC"
-        : lowered.includes("vsc")
-          ? "VSC"
-          : lowered.includes("yellow") || lowered.includes("crash")
-            ? "Yellow"
-            : "Green";
-
   const upcomingStart = nextSession ? new Date(nextSession.date_start).getTime() : null;
   const countdownEndsAt =
     upcomingStart && upcomingStart > Date.now() ? nextSession?.date_start ?? null : null;
 
-  const modeledEvents: DashboardData["raceControl"]["events"] = activityItems.slice(0, 5).map((item, index) => ({
-    id: `control-${item.id}`,
-    timestamp:
-      item.publishedAt ??
-      new Date(Date.now() - (index + 1) * 4 * 60_000).toISOString(),
-    type:
-      item.category === "strategy"
-        ? ("pit" as const)
-        : item.category === "breaking"
-          ? ("incident" as const)
-          : item.category === "timing"
-            ? ("overtake" as const)
-            : ("system" as const),
-    message: item.title,
-    driverId: null,
-  }));
-
   return {
-    flag,
-    message:
-      flag === "Green"
-        ? "Track clear. Race control feed is monitoring live timing and source activity."
-        : incident?.title ?? "Race control condition changed.",
+    flag: "Idle",
+    message: "No live race-control feed is connected.",
     countdownEndsAt,
-    events: [
-      {
-        id: "control-current-flag",
-        timestamp: new Date().toISOString(),
-        type: "flag" as const,
-        message: `${flag} flag status`,
-        driverId: null,
-      },
-      ...modeledEvents,
-    ].slice(0, 8),
+    events: [],
   };
-}
-
-function buildWeekendWeather(sessions: OpenF1Session[]): DashboardData["weekendWeather"] {
-  return sessions.map((session, index) => {
-    const seed = (session.session_key + index * 17) % 31;
-    const rainChance = Math.min(82, Math.max(8, seed * 3));
-
-    return {
-      sessionKey: session.session_key,
-      label: session.session_name,
-      temperatureC: 18 + ((session.session_key + index) % 9),
-      rainChance,
-      summary:
-        rainChance > 55
-          ? "Showers possible"
-          : rainChance > 30
-            ? "Mixed cloud"
-            : "Dry running likely",
-    };
-  });
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
@@ -1534,7 +1518,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const [standingsRowsResult, fallbackDriversResult] = await Promise.allSettled([
     fetchSeasonStandings(season),
-    fetchOpenDrivers("latest"),
+    fetchOpenDriversForContext(recentRaceSession?.session_key ?? null),
   ]);
   const standingsRows =
     standingsRowsResult.status === "fulfilled" ? standingsRowsResult.value : [];
@@ -1606,8 +1590,11 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const telemetryInsights = buildTelemetryInsights(telemetrySamples);
   const trackCars = buildTrackCars(positions, driverInsights);
-  const mapCircuitName =
-    nextSession?.circuit_short_name ?? telemetrySession?.circuitName ?? "Live Circuit";
+  const mapContextSession =
+    recentRaceSession && (telemetrySamples.length || trackCars.length)
+      ? recentRaceSession
+      : nextSession;
+  const mapCircuitName = mapContextSession?.circuit_short_name ?? "Circuit unavailable";
   const raceLabel = nextSession
     ? `${nextSession.circuit_short_name} ${nextSession.session_name}`
     : telemetrySession
@@ -1623,8 +1610,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     driverInsights,
     raceLabel,
   );
-  const raceControl = buildRaceControl(activity.items, nextSession);
-  const weekendWeather = buildWeekendWeather(nextMeetingSessions);
+  const raceControl = buildRaceControl(nextSession);
+  const weekendWeather: DashboardData["weekendWeather"] = [];
 
   return {
     generatedAt,
@@ -1665,11 +1652,11 @@ export async function getDashboardData(): Promise<DashboardData> {
       telemetry: {
         label: "Telemetry",
         source: "OpenF1 /car_data",
-        status: telemetrySamples.length ? "cached" : "fallback",
+        status: telemetrySamples.length ? "cached" : "empty",
         updatedAt: telemetrySamples.length ? generatedAt : null,
         note: telemetrySamples.length
-          ? "Fastest-lap telemetry is sampled server-side and scrubbed client-side."
-          : "Live telemetry was unavailable for this build, so the UI falls back to structure-only states.",
+          ? `Archived fastest-lap telemetry from ${telemetrySession?.circuitName ?? "the latest completed race"}; this is a replay, not a live session.`
+          : "No session-matched telemetry is available in this snapshot.",
       },
       fantasy: {
         label: "Fantasy",
@@ -1677,7 +1664,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           fantasy.source === "official"
             ? "Official F1 Fantasy API"
             : "Standings-derived fallback model",
-        status: fantasy.source === "official" ? "live" : "fallback",
+        status: fantasy.source === "official" ? "live" : "simulated",
         updatedAt: generatedAt,
         note: fantasy.note,
       },
@@ -1686,7 +1673,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         source: "Motorsport.com, The Race, Reddit, X",
         status: activity.items.some((item) => item.source !== "fallback")
           ? "cached"
-          : "fallback",
+          : "simulated",
         updatedAt: activity.items.length ? generatedAt : null,
         note: activity.items.some((item) => item.source !== "fallback")
           ? "Editorial and social feeds are normalized into a single activity rail."
