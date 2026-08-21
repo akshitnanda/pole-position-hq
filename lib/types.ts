@@ -27,7 +27,7 @@ export type DriverInsight = {
   championshipWon: boolean;
   teamName: string;
   teamColor: string;
-  headshotUrl: string;
+  headshotUrl: string | null;
   totalRaceWins: number;
   totalPodiums: number;
   totalPolePositions: number;

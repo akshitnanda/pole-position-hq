@@ -167,7 +167,6 @@ let GRAPHQL_ENDPOINT =
 let FANTASY_API_BASE_URL =
   process.env.F1_FANTASY_API_BASE_URL?.replace(/\/$/, "") ?? null;
 const REQUEST_TIMEOUT_MS = 8_000;
-const DRIVER_FALLBACK_IMAGE = "https://media.formula1.com/d_driver_fallback_image.png";
 const NEWS_REVALIDATE_SECONDS = 180;
 
 const ACTIVITY_FEEDS = [
@@ -195,14 +194,14 @@ function normalizeTeamColor(value: string | null | undefined) {
 
 function resolveHeadshotUrl(value: string | null | undefined) {
   if (!value) {
-    return DRIVER_FALLBACK_IMAGE;
+    return null;
   }
 
   try {
     const url = new URL(value);
-    return url.protocol === "https:" ? url.toString() : DRIVER_FALLBACK_IMAGE;
+    return url.protocol === "https:" ? url.toString() : null;
   } catch {
-    return DRIVER_FALLBACK_IMAGE;
+    return null;
   }
 }
 
@@ -1597,10 +1596,8 @@ function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight
 }
 
 async function fetchOpenDriversForContext(sessionKey: number | null) {
-  const attempts: Array<number | "latest"> = ["latest"];
-  if (sessionKey !== null) {
-    attempts.push(sessionKey);
-  }
+  const attempts: Array<number | "latest"> =
+    sessionKey === null ? ["latest"] : [sessionKey, "latest"];
 
   for (const attempt of attempts) {
     try {
