@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import mapboxgl from "mapbox-gl";
 import {
   CategoryScale,
@@ -15,13 +14,7 @@ import {
   type ChartOptions,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
-import {
-  AnimatePresence,
-  motion,
-  useMotionValue,
-  useSpring,
-  useTransform,
-} from "framer-motion";
+import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import {
   Gauge,
   Maximize2,
@@ -39,10 +32,9 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent,
   type TouchEvent,
 } from "react";
-import type { DriverInsight, TelemetrySample } from "@/lib/types";
+import type { DashboardData, TelemetrySample } from "@/lib/types";
 
 ChartJS.register(
   CategoryScale,
@@ -97,14 +89,12 @@ type TrackPoint = {
 
 export type F1TelemetrySuiteProps = {
   circuitName: string;
-  drivers: DriverInsight[];
-  samples: TelemetrySample[];
+  comparison: DashboardData["telemetryComparison"];
   scrubIndex: number;
-  selectedDriver: DriverInsight | null;
-  selectedDriverId: string;
   onScrub: (index: number) => void;
-  onSelectDriver: (driverId: string) => void;
 };
+
+const EMPTY_TELEMETRY_SAMPLES: TelemetrySample[] = [];
 
 const MONTREAL_NODES: CircuitNode[] = [
   { x: 84, y: 232 },
@@ -217,21 +207,6 @@ function predictNextLapTime(samples: TelemetrySample[]) {
   return last.elapsed + last.elapsed * remainingRatio * (1 - avgThrottle * 0.04 + avgBrake * 0.09);
 }
 
-function findDriver(transcript: string, drivers: DriverInsight[]) {
-  const normalized = transcript.toLowerCase();
-  return drivers.find((driver) =>
-    [
-      driver.firstName,
-      driver.lastName,
-      driver.fullName,
-      driver.abbreviation,
-      driver.teamName,
-    ]
-      .map((value) => value.toLowerCase())
-      .some((alias) => alias && normalized.includes(alias)),
-  );
-}
-
 function useReplayBuffer(scrubIndex: number, onScrub: (index: number) => void) {
   const framesRef = useRef<ReplayFrame[]>([]);
   const [isReplaying, setIsReplaying] = useState(false);
@@ -280,69 +255,6 @@ function useReplayBuffer(scrubIndex: number, onScrub: (index: number) => void) {
   }, [replay]);
 
   return { replay, isReplaying, frameCount };
-}
-
-function HelmetCanvas({ color, label }: { color: string; label: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [rotation, setRotation] = useState(0);
-  const dragStartRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) {
-      return;
-    }
-
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    const gradient = context.createRadialGradient(96 + rotation * 20, 56, 12, 96, 74, 78);
-    gradient.addColorStop(0, "#ffffff");
-    gradient.addColorStop(0.36, `#${color}`);
-    gradient.addColorStop(1, "#11151d");
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.ellipse(96, 78, 68, 52, rotation * 0.18, 0, Math.PI * 2);
-    context.fill();
-    context.fillStyle = "rgba(7,10,16,0.92)";
-    context.beginPath();
-    context.roundRect(86 + rotation * 8, 58, 56, 24, 10);
-    context.fill();
-    context.strokeStyle = "rgba(255,255,255,0.78)";
-    context.lineWidth = 4;
-    context.beginPath();
-    context.arc(82, 76, 42, -0.6, 1.9);
-    context.stroke();
-    context.fillStyle = "#ffffff";
-    context.font = "700 22px Arial";
-    context.textAlign = "center";
-    context.fillText(label, 96, 132);
-  }, [color, label, rotation]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={192}
-      height={152}
-      className="h-full w-full cursor-grab touch-none"
-      aria-label={`${label} generated helmet viewer`}
-      onPointerDown={(event) => {
-        dragStartRef.current = event.clientX;
-      }}
-      onPointerMove={(event) => {
-        if (dragStartRef.current === null) {
-          return;
-        }
-
-        setRotation(Math.max(-1, Math.min(1, (event.clientX - dragStartRef.current) / 120)));
-      }}
-      onPointerUp={() => {
-        dragStartRef.current = null;
-      }}
-      onPointerLeave={() => {
-        dragStartRef.current = null;
-      }}
-    />
-  );
 }
 
 function Speedometer({ speed, accent }: { speed: number; accent: string }) {
@@ -454,39 +366,40 @@ function MapboxTelemetryLayer({
 
 export function F1TelemetrySuite({
   circuitName,
-  drivers,
-  samples,
+  comparison,
   scrubIndex,
-  selectedDriver,
-  selectedDriverId,
   onScrub,
-  onSelectDriver,
 }: F1TelemetrySuiteProps) {
   const trackPath = useMemo(() => nodesToPath(MONTREAL_NODES), []);
   const pathRef = useRef<SVGPathElement | null>(null);
   const chartRef = useRef<ChartJS<"line"> | null>(null);
   const voiceRef = useRef<SpeechRecognitionLike | null>(null);
-  const gestureStartRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const pinchDistanceRef = useRef<number | null>(null);
-  const longPressTimerRef = useRef<number | null>(null);
   const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
   const [zoom, setZoom] = useState(0);
   const [focusCorner, setFocusCorner] = useState<number | null>(null);
-  const [compareDriverId, setCompareDriverId] = useState<string | null>(null);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const primaryTrace = comparison.traces[0] ?? null;
+  const compareTrace = comparison.traces[1] ?? null;
+  const samples = primaryTrace?.samples ?? EMPTY_TELEMETRY_SAMPLES;
   const activeIndex = clampIndex(scrubIndex, Math.max(1, samples.length));
   const activeSample = samples[activeIndex] ?? samples.at(-1) ?? null;
   const activeProgress = activeSample
     ? clampUnit(activeSample.trackPosition, activeIndex / Math.max(1, samples.length - 1))
     : 0;
   const activePoint = trackPoints[activeIndex] ?? null;
-  const selectedDriverIndex = drivers.findIndex((driver) => driver.id === selectedDriverId);
-  const compareDriver =
-    drivers.find((driver) => driver.id === compareDriverId) ??
-    drivers[(Math.max(0, selectedDriverIndex) + 1) % Math.max(1, drivers.length)] ??
-    null;
-  const accent = selectedDriver?.teamColor ?? "E10600";
+  const compareIndex = compareTrace?.samples.length
+    ? clampIndex(
+        Math.round(
+          (activeIndex / Math.max(1, samples.length - 1)) *
+            Math.max(0, compareTrace.samples.length - 1),
+        ),
+        compareTrace.samples.length,
+      )
+    : 0;
+  const compareSample = compareTrace?.samples[compareIndex] ?? null;
+  const accent = primaryTrace?.teamColor ?? "E10600";
   const predictedLap = useMemo(() => predictNextLapTime(samples), [samples]);
   const replay = useReplayBuffer(activeIndex, onScrub);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -510,14 +423,13 @@ export function F1TelemetrySuite({
   }, [samples, trackPath]);
 
   const chartData = useMemo<ChartData<"line">>(() => {
-    const labels = samples.map((sample) => sample.elapsed.toFixed(1));
-    const compareOffset = compareDriver ? compareDriver.standingPosition * 0.35 : 0;
+    const labels = samples.map((sample) => `${Math.round(sample.trackPosition * 100)}%`);
 
     return {
       labels,
       datasets: [
         {
-          label: "Speed",
+          label: `${primaryTrace?.abbreviation ?? "Primary"} speed`,
           data: samples.map((sample) => sample.speed),
           borderColor: `#${accent}`,
           backgroundColor: rgba(accent, 0.16),
@@ -528,7 +440,7 @@ export function F1TelemetrySuite({
           yAxisID: "speed",
         },
         {
-          label: "Throttle",
+          label: `${primaryTrace?.abbreviation ?? "Primary"} throttle`,
           data: samples.map((sample) => sample.throttle),
           borderColor: "#00a76f",
           borderWidth: 1.8,
@@ -537,7 +449,7 @@ export function F1TelemetrySuite({
           yAxisID: "percent",
         },
         {
-          label: "Brake",
+          label: `${primaryTrace?.abbreviation ?? "Primary"} brake`,
           data: samples.map((sample) => sample.brake),
           borderColor: "#e10600",
           borderWidth: 1.8,
@@ -545,14 +457,20 @@ export function F1TelemetrySuite({
           tension: 0.24,
           yAxisID: "percent",
         },
-        ...(compareDriver
+        ...(compareTrace
           ? [
               {
-                label: `${compareDriver.abbreviation} trace`,
-                data: samples.map((sample) =>
-                  Math.max(0, sample.speed - compareOffset + Math.sin(sample.index / 4) * 5),
-                ),
-                borderColor: `#${compareDriver.teamColor}`,
+                label: `${compareTrace.abbreviation} speed`,
+                data: samples.map((sample) => {
+                  const comparisonIndex = clampIndex(
+                    Math.round(
+                      sample.trackPosition * Math.max(0, compareTrace.samples.length - 1),
+                    ),
+                    compareTrace.samples.length,
+                  );
+                  return compareTrace.samples[comparisonIndex]?.speed ?? 0;
+                }),
+                borderColor: `#${compareTrace.teamColor}`,
                 borderDash: [6, 5],
                 borderWidth: 1.8,
                 pointRadius: 0,
@@ -563,7 +481,7 @@ export function F1TelemetrySuite({
           : []),
       ],
     };
-  }, [accent, compareDriver, samples]);
+  }, [accent, compareTrace, primaryTrace?.abbreviation, samples]);
 
   const chartOptions = useMemo<ChartOptions<"line">>(
     () => ({
@@ -617,20 +535,6 @@ export function F1TelemetrySuite({
     [onScrub, samples],
   );
 
-  const selectNeighbor = (direction: 1 | -1) => {
-    if (!drivers.length) {
-      return;
-    }
-
-    const currentIndex = selectedDriverIndex >= 0 ? selectedDriverIndex : 0;
-    const next =
-      drivers[(currentIndex + direction + drivers.length) % drivers.length];
-    if (next) {
-      onSelectDriver(next.id);
-      navigator.vibrate?.(12);
-    }
-  };
-
   const startVoice = () => {
     const speechWindow = window as SpeechWindow;
     const Recognition =
@@ -662,14 +566,6 @@ export function F1TelemetrySuite({
         replay.replay();
       }
 
-      const matched = findDriver(command, drivers);
-      if (matched) {
-        if (normalized.includes("compare")) {
-          setCompareDriverId(matched.id);
-        } else {
-          onSelectDriver(matched.id);
-        }
-      }
     };
     recognition.onerror = () => {
       setIsVoiceListening(false);
@@ -679,25 +575,6 @@ export function F1TelemetrySuite({
     };
     setIsVoiceListening(true);
     recognition.start();
-  };
-
-  const handleGestureStart = (event: PointerEvent<HTMLDivElement>) => {
-    gestureStartRef.current = { x: event.clientX, y: event.clientY, at: performance.now() };
-  };
-
-  const handleGestureEnd = (event: PointerEvent<HTMLDivElement>) => {
-    const start = gestureStartRef.current;
-    if (!start) {
-      return;
-    }
-
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    gestureStartRef.current = null;
-
-    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy)) {
-      selectNeighbor(dx < 0 ? 1 : -1);
-    }
   };
 
   const handlePinch = (event: TouchEvent<HTMLDivElement>) => {
@@ -713,24 +590,6 @@ export function F1TelemetrySuite({
     setZoom((current) => Math.max(0, Math.min(4, current + (distance - previous) / 120)));
   };
 
-  const startLongPress = (driverId: string) => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-    }
-
-    longPressTimerRef.current = window.setTimeout(() => {
-      setCompareDriverId(driverId);
-      navigator.vibrate?.(25);
-    }, 540);
-  };
-
-  const stopLongPress = () => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  };
-
   return (
     <section
       className="f1-suite grid min-w-0 gap-4 rounded-[28px] border border-white/10 bg-[rgba(0,0,0,0.6)] p-4 text-white shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur-[12px] sm:p-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]"
@@ -739,8 +598,6 @@ export function F1TelemetrySuite({
           ["--suite-accent" as string]: `#${accent}`,
         }
       }
-      onPointerDown={handleGestureStart}
-      onPointerUp={handleGestureEnd}
     >
       <div className="grid min-w-0 gap-4">
         <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -927,71 +784,68 @@ export function F1TelemetrySuite({
 
       <aside className="grid min-w-0 content-start gap-4">
         <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-start justify-between gap-3">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Driver carousel</div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Observed comparison</div>
               <h3 className="mt-1 font-[var(--font-display)] text-[clamp(1.1rem,2vw,1.55rem)] font-semibold">
-                Flip cards
+                Fastest lap vs fastest lap
               </h3>
             </div>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => selectNeighbor(-1)} className="rounded-full bg-white/10 px-3 py-1 text-sm">
-                Prev
-              </button>
-              <button type="button" onClick={() => selectNeighbor(1)} className="rounded-full bg-white/10 px-3 py-1 text-sm">
-                Next
-              </button>
-            </div>
+            <span className="rounded-full border border-white/10 bg-white/8 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/55">
+              {comparison.status === "cached" ? "OpenF1 replay" : "Unavailable"}
+            </span>
           </div>
-          <div className="flex snap-x gap-3 overflow-x-auto pb-2">
-            {drivers.slice(0, 10).map((driver) => {
-              const active = driver.id === selectedDriverId;
-              return (
-                <motion.button
-                  key={driver.id}
-                  type="button"
-                  onClick={() => onSelectDriver(driver.id)}
-                  onPointerDown={() => startLongPress(driver.id)}
-                  onPointerUp={stopLongPress}
-                  onPointerLeave={stopLongPress}
-                  className="group relative h-[180px] min-w-[150px] snap-start rounded-[20px] border border-white/10 bg-white/8 p-0 text-left [perspective:900px]"
-                  style={{ borderColor: active ? `#${driver.teamColor}` : undefined }}
-                  whileHover={{ y: -4 }}
+          <div className="grid gap-2">
+            {[primaryTrace, compareTrace].map((trace, index) =>
+              trace ? (
+                <div
+                  key={trace.driverId}
+                  className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[18px] border border-white/10 bg-white/8 p-3"
                 >
-                  <motion.div
-                    className="absolute inset-0 rounded-[20px] p-3 [backface-visibility:hidden] group-hover:[transform:rotateY(180deg)]"
-                    transition={{ duration: 0.45 }}
+                  <span
+                    className="grid h-9 w-9 place-items-center rounded-full telemetry-text text-xs font-semibold"
+                    style={{ background: rgba(trace.teamColor, 0.2), color: `#${trace.teamColor}` }}
                   >
-                    <Image
-                      src={driver.headshotUrl}
-                      alt=""
-                      width={84}
-                      height={84}
-                      className="mx-auto h-[84px] w-[84px] rounded-full border border-white/18 object-cover"
-                    />
-                    <div className="mt-3 truncate text-sm font-semibold text-white">{driver.fullName}</div>
-                    <div className="text-xs text-white/50">{driver.teamName}</div>
-                    <div className="telemetry-text mt-2 text-xs text-white/70">P{driver.standingPosition} / {driver.points} pts</div>
-                  </motion.div>
-                  <motion.div className="absolute inset-0 rounded-[20px] p-3 [transform:rotateY(180deg)] [backface-visibility:hidden] group-hover:[transform:rotateY(0deg)]">
-                    <HelmetCanvas color={driver.teamColor} label={driver.abbreviation} />
-                  </motion.div>
-                </motion.button>
-              );
-            })}
+                    {trace.abbreviation}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-white">{trace.driverLabel}</span>
+                    <span className="mt-0.5 block text-[10px] uppercase tracking-[0.12em] text-white/45">
+                      Lap {trace.lapNumber} · {trace.samples.length} samples
+                    </span>
+                  </span>
+                  <span className="text-right">
+                    <span className="telemetry-text block text-sm font-semibold text-white">{formatLapTime(trace.lapTime)}</span>
+                    <span className="mt-0.5 block text-[9px] uppercase tracking-[0.12em] text-white/42">
+                      {index === 0 ? "Reference" : "Compare"}
+                    </span>
+                  </span>
+                </div>
+              ) : null,
+            )}
           </div>
-          <AnimatePresence>
-            {compareDriver ? (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                className="mt-3 rounded-[18px] border border-white/10 bg-white/8 p-3 text-sm text-white/75"
-              >
-                Comparing against <span className="font-semibold text-white">{compareDriver.fullName}</span>.
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+          <div className="mt-3 rounded-[18px] border border-white/10 bg-white/8 p-3 text-xs leading-5 text-white/58">
+            {comparison.note}
+          </div>
+          {primaryTrace && compareTrace ? (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-[16px] bg-white/8 p-3">
+                <div className="text-[9px] uppercase tracking-[0.14em] text-white/42">Lap delta</div>
+                <div className="telemetry-text mt-1 text-lg font-semibold text-white">
+                  {compareTrace.lapTime - primaryTrace.lapTime >= 0 ? "+" : ""}
+                  {(compareTrace.lapTime - primaryTrace.lapTime).toFixed(3)}s
+                </div>
+              </div>
+              <div className="rounded-[16px] bg-white/8 p-3">
+                <div className="text-[9px] uppercase tracking-[0.14em] text-white/42">At cursor</div>
+                <div className="telemetry-text mt-1 text-lg font-semibold text-white">
+                  {activeSample && compareSample
+                    ? `${activeSample.speed - compareSample.speed >= 0 ? "+" : ""}${activeSample.speed - compareSample.speed} km/h`
+                    : "--"}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
@@ -1050,7 +904,7 @@ export function F1TelemetrySuite({
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Voice control</div>
-              <div className="mt-1 text-sm font-semibold">Map, compare, replay</div>
+              <div className="mt-1 text-sm font-semibold">Map and replay</div>
             </div>
             <button
               type="button"
@@ -1062,7 +916,7 @@ export function F1TelemetrySuite({
             </button>
           </div>
           <div className="mt-3 text-xs leading-5 text-white/58">
-            {voiceTranscript || "Commands: zoom to turn 6, compare Lewis, show replay."}
+            {voiceTranscript || "Commands: zoom to turn 6, show replay."}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" onClick={() => setFocusCorner(6)} className="rounded-full bg-white/10 px-3 py-1.5 text-xs">
@@ -1070,9 +924,6 @@ export function F1TelemetrySuite({
             </button>
             <button type="button" onClick={replay.replay} className="rounded-full bg-white/10 px-3 py-1.5 text-xs">
               {replay.isReplaying ? <Pause size={12} /> : <Play size={12} />}
-            </button>
-            <button type="button" onClick={() => setCompareDriverId(compareDriver?.id ?? null)} className="rounded-full bg-white/10 px-3 py-1.5 text-xs">
-              Compare
             </button>
           </div>
         </div>
