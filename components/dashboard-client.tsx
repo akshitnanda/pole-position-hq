@@ -524,42 +524,76 @@ function TelemetryPlot({
 
   const width = 620;
   const height = 240;
-  const padding = 14;
+  const padding = { top: 14, right: 42, bottom: 28, left: 48 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const speeds = samples.map((sample) => sample.speed);
+  const speedMin = Math.max(0, Math.floor((Math.min(...speeds) - 10) / 20) * 20);
+  const speedMax = Math.ceil((Math.max(...speeds) + 10) / 20) * 20;
 
-  const buildPoints = (values: number[]) => {
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+  const buildPoints = (values: number[], min: number, max: number) => {
     const range = Math.max(1, max - min);
 
     return values.map((value, index) => {
       const x =
-        padding +
-        (index / Math.max(1, values.length - 1)) * (width - padding * 2);
+        padding.left +
+        (index / Math.max(1, values.length - 1)) * plotWidth;
       const y =
-        height -
-        padding -
-        ((value - min) / range) * (height - padding * 2);
+        padding.top + plotHeight - ((value - min) / range) * plotHeight;
       return { x, y };
     });
   };
 
-  const speed = buildPoints(samples.map((sample) => sample.speed));
-  const throttle = buildPoints(samples.map((sample) => sample.throttle));
-  const brake = buildPoints(samples.map((sample) => sample.brake));
+  const speed = buildPoints(speeds, speedMin, speedMax);
+  const throttle = buildPoints(samples.map((sample) => sample.throttle), 0, 100);
+  const brake = buildPoints(samples.map((sample) => sample.brake), 0, 100);
   const activePoint = speed[Math.min(activeIndex, speed.length - 1)];
-  const segmentWidth = (width - padding * 2) / Math.max(1, samples.length - 1);
+  const segmentWidth = plotWidth / Math.max(1, samples.length - 1);
+  const yTicks = [0, 0.5, 1];
+  const xTicks = [0, 0.5, 1];
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-full w-full">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-full w-full"
+      role="img"
+      aria-label="Telemetry trace with speed in kilometers per hour and throttle and brake in percent across lap distance"
+    >
+      <title>Speed, throttle, and brake across normalized lap distance</title>
+      {yTicks.map((ratio) => {
+        const y = padding.top + plotHeight - ratio * plotHeight;
+        const speedValue = Math.round(speedMin + ratio * (speedMax - speedMin));
+        const percentValue = Math.round(ratio * 100);
+        return (
+          <g key={`y-${ratio}`}>
+            <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(17,21,29,0.08)" />
+            <text x={padding.left - 7} y={y + 3} textAnchor="end" fontSize="9" fill="var(--muted)">{speedValue}</text>
+            <text x={width - padding.right + 7} y={y + 3} fontSize="9" fill="var(--muted)">{percentValue}%</text>
+          </g>
+        );
+      })}
+      {xTicks.map((ratio) => (
+        <text
+          key={`x-${ratio}`}
+          x={padding.left + ratio * plotWidth}
+          y={height - 6}
+          textAnchor={ratio === 0 ? "start" : ratio === 1 ? "end" : "middle"}
+          fontSize="9"
+          fill="var(--muted)"
+        >
+          {Math.round(ratio * 100)}% lap
+        </text>
+      ))}
+      <text x={padding.left} y={10} fontSize="8" fill="var(--muted)">km/h</text>
       {samples.map((sample, index) => {
         const tone = getPhaseTone(sample.phase);
-        const x = padding + index * segmentWidth - segmentWidth / 2;
+        const x = padding.left + index * segmentWidth - segmentWidth / 2;
 
         return (
           <rect
             key={`phase-${sample.index}`}
-            x={Math.max(padding, x)}
-            y={height - 20}
+            x={Math.max(padding.left, x)}
+            y={height - padding.bottom + 5}
             width={Math.max(4, segmentWidth)}
             height="8"
             rx="4"
@@ -570,8 +604,8 @@ function TelemetryPlot({
       <line
         x1={activePoint.x}
         x2={activePoint.x}
-        y1={10}
-        y2={height - 10}
+        y1={padding.top}
+        y2={height - padding.bottom}
         stroke="rgba(17,21,29,0.12)"
         strokeDasharray="4 4"
       />
@@ -594,7 +628,8 @@ function TelemetryPlot({
       <polyline
         points={brake.map((point) => `${point.x},${point.y}`).join(" ")}
         fill="none"
-        stroke="rgba(18, 21, 29, 0.42)"
+        stroke="var(--muted)"
+        opacity="0.78"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1793,6 +1828,7 @@ function PerformanceProfilePanel({
 
 function TelemetryExperiencePanel({
   accent,
+  debugMode,
   driverLabel,
   insights,
   isPlaying,
@@ -1805,6 +1841,7 @@ function TelemetryExperiencePanel({
   onScrub,
 }: {
   accent: string;
+  debugMode: boolean;
   driverLabel: string | null;
   insights: DashboardData["telemetryInsights"];
   isPlaying: boolean;
@@ -1955,7 +1992,7 @@ function TelemetryExperiencePanel({
         />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+      <div className={`mt-4 grid gap-4 ${debugMode ? "lg:grid-cols-[minmax(0,1fr)_180px]" : "grid-cols-1"}`}>
         <div
           ref={chartRef}
           className={`minimal-card telemetry-scrubber signal-sheen rounded-[22px] p-4 select-none sm:cursor-crosshair ${FOCUS_RING}`}
@@ -1985,23 +2022,23 @@ function TelemetryExperiencePanel({
                   className="h-2 w-2 rounded-full"
                   style={{ background: rgba(accent, 0.95) }}
                 />
-                Speed
+                Speed (km/h)
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-                Throttle
+                <span className="h-2 w-2 rounded-full bg-[#e10600]" />
+                Throttle (%)
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[var(--track)]/50" />
-                Brake
+                <span className="h-2 w-2 rounded-full bg-[var(--muted)]" />
+                Brake (%)
               </span>
             </div>
             <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]/80 sm:ml-auto">
-              drag or hover to sync the map
+              {debugMode ? "drag or hover to sync the map" : "drag or hover to inspect the lap"}
             </span>
           </div>
           <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>
-          <div className="mb-3 grid gap-2 sm:grid-cols-4">
+          <div className={`mb-3 grid gap-2 ${debugMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <div className="glass-pill rounded-[16px] px-3 py-2.5">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
                 Scrub speed
@@ -2029,14 +2066,16 @@ function TelemetryExperiencePanel({
                 {phaseTone?.label ?? "--"}
               </div>
             </div>
-            <div className="glass-pill rounded-[16px] px-3 py-2.5">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                Worker delta
+            {debugMode ? (
+              <div className="glass-pill rounded-[16px] px-3 py-2.5">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Worker delta
+                </div>
+                <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+                  {workerMetrics ? formatDeltaSpeed(workerMetrics.maxDelta) : "--"}
+                </div>
               </div>
-              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
-                {workerMetrics ? formatDeltaSpeed(workerMetrics.maxDelta) : "--"}
-              </div>
-            </div>
+            ) : null}
           </div>
           <div className="h-[240px] sm:h-[290px]">
             <TelemetryPlot
@@ -2047,7 +2086,7 @@ function TelemetryExperiencePanel({
           </div>
         </div>
 
-        <div className="minimal-card rounded-[22px] p-4">
+        {debugMode ? <div className="minimal-card rounded-[22px] p-4">
           <div className="eyebrow">Load circle</div>
           <div className="section-title mt-2 text-base font-semibold">Pit wall metrics</div>
           <div className="mt-4 flex justify-center">
@@ -2094,7 +2133,7 @@ function TelemetryExperiencePanel({
               }
             />
           </div>
-        </div>
+        </div> : null}
       </div>
     </Panel>
   );
@@ -3271,7 +3310,7 @@ function TimingBoardPanel({
   }
 
   return (
-    <Panel>
+    <Panel className="min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
           <div className="flex flex-wrap items-center gap-2">
@@ -3408,6 +3447,203 @@ function TimingBoardPanel({
             })}
           </div>
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+function getStrategySignalTone(
+  signal: DashboardData["strategy"]["drivers"][number]["pitOutcomes"][number]["signal"],
+) {
+  if (signal === "undercut" || signal === "overcut" || signal === "gained") {
+    return "border-[#00a76f]/25 bg-[#00a76f]/10 text-[#00845a]";
+  }
+  if (signal === "lost") {
+    return "border-[#e10600]/20 bg-[#e10600]/8 text-[#c51b17]";
+  }
+  return "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]";
+}
+
+function StrategyPanel({
+  strategy,
+  selectedDriverId,
+  onSelect,
+}: {
+  strategy: DashboardData["strategy"];
+  selectedDriverId: string;
+  onSelect: (driverId: string) => void;
+}) {
+  const driversWithStints = strategy.drivers.filter((driver) => driver.stints.length);
+  const totalStops = strategy.drivers.reduce(
+    (sum, driver) => sum + driver.pitOutcomes.length,
+    0,
+  );
+  const sourceTone = getFeedTone(strategy.status);
+  const totalLaps = Math.max(strategy.totalLaps, 1);
+
+  if (!driversWithStints.length) {
+    return (
+      <Panel>
+        <div className="eyebrow">Strategy</div>
+        <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+          Stint replay unavailable
+        </div>
+        <div className="mt-4 rounded-[16px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-4 py-5 text-sm text-[var(--muted)]">
+          {strategy.note}
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Strategy</div>
+            <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}>
+              {sourceTone.label}
+            </span>
+            <span className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+              Session replay
+            </span>
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            {strategy.session
+              ? `${strategy.session.circuitName} stint map`
+              : "Tyre and pit sequence"}
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            See when the race changed: compound sequence, stop timing, and the first observable position response.
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <StatChip label="Race laps" value={`${strategy.totalLaps || "--"}`} />
+          <StatChip label="Strategies" value={`${driversWithStints.length}`} />
+          <StatChip label="Stops" value={`${totalStops}`} />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-[var(--line)] py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+        {[
+          ["SOFT", "Soft"],
+          ["MEDIUM", "Medium"],
+          ["HARD", "Hard"],
+          ["INTERMEDIATE", "Intermediate"],
+          ["WET", "Wet"],
+        ].map(([compound, label]) => {
+          const tone = getCompoundTone(compound);
+          return (
+            <span key={compound} className="inline-flex items-center gap-1.5">
+              <span
+                className="grid h-5 w-5 place-items-center rounded-full text-[9px] font-bold"
+                style={{ color: tone.color, background: tone.background }}
+              >
+                {tone.label}
+              </span>
+              {label}
+            </span>
+          );
+        })}
+        <span className="ml-auto">Pit markers sit on the lap timeline</span>
+      </div>
+
+      <div className="mt-4 min-w-0 max-w-full overflow-x-auto hide-scrollbar">
+        <div className="min-w-[900px]">
+          <div className="grid grid-cols-[58px_150px_minmax(500px,1fr)_138px] items-center gap-3 px-3 pb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+            <span>Finish</span>
+            <span>Driver</span>
+            <span className="flex justify-between"><span>Lap 1</span><span>Lap {strategy.totalLaps}</span></span>
+            <span>Stop read</span>
+          </div>
+          <div className="grid gap-1.5">
+            {driversWithStints.map((driver) => {
+              const active = driver.driverId === selectedDriverId;
+              const signal =
+                driver.pitOutcomes.find(
+                  (outcome) => outcome.signal === "undercut" || outcome.signal === "overcut",
+                ) ??
+                driver.pitOutcomes.find(
+                  (outcome) => outcome.positionDelta !== null && outcome.positionDelta !== 0,
+                ) ??
+                driver.pitOutcomes.at(-1) ??
+                null;
+              const signalLabel = signal
+                ? `${signal.signal === "unavailable" ? "No read" : signal.signal}${
+                    signal.positionDelta
+                      ? ` ${signal.positionDelta > 0 ? "+" : ""}${signal.positionDelta}`
+                      : ""
+                  }`
+                : "No stop";
+
+              return (
+                <button
+                  key={driver.driverId}
+                  type="button"
+                  onClick={() => onSelect(driver.driverId)}
+                  aria-pressed={active}
+                  className={`grid grid-cols-[58px_150px_minmax(500px,1fr)_138px] items-center gap-3 rounded-[12px] border px-3 py-2.5 text-left transition hover:-translate-y-px ${FOCUS_RING}`}
+                  style={{
+                    borderColor: active ? rgba(driver.teamColor, 0.42) : "var(--line)",
+                    background: active
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.14)}, var(--surface-strong))`
+                      : "var(--surface)",
+                  }}
+                >
+                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                    P{driver.finalPosition}
+                  </span>
+                  <span className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: `#${driver.teamColor}` }}>
+                    <span className="block text-sm font-semibold text-[var(--foreground)]">{driver.abbreviation}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-[var(--muted)]">{driver.fullName}</span>
+                  </span>
+                  <span className="relative block h-8 overflow-hidden rounded-[9px] border border-[var(--line)] bg-[var(--surface-strong)]">
+                    {driver.stints.map((stint) => {
+                      const tone = getCompoundTone(stint.compound);
+                      const lapEnd = stint.lapEnd ?? strategy.totalLaps;
+                      const left = ((stint.lapStart - 1) / totalLaps) * 100;
+                      const width = (Math.max(1, lapEnd - stint.lapStart + 1) / totalLaps) * 100;
+                      return (
+                        <span
+                          key={`${driver.driverId}-${stint.stintNumber}`}
+                          className="absolute inset-y-1 flex items-center overflow-hidden rounded-[6px] border px-1.5 text-[9px] font-semibold"
+                          style={{
+                            left: `${left}%`,
+                            width: `${width}%`,
+                            color: tone.color,
+                            background: tone.background,
+                            borderColor: rgba(driver.teamColor, 0.16),
+                          }}
+                          title={`${stint.compound ?? "Unknown compound"}, laps ${stint.lapStart}-${lapEnd}`}
+                        >
+                          {tone.label} {stint.lapStart}-{lapEnd}
+                        </span>
+                      );
+                    })}
+                    {driver.pitOutcomes.map((outcome, index) => (
+                      <span
+                        key={`${driver.driverId}-pit-${outcome.lapNumber}-${index}`}
+                        className="absolute inset-y-0 z-10 w-px bg-[var(--foreground)]/55"
+                        style={{ left: `${(outcome.lapNumber / totalLaps) * 100}%` }}
+                        title={`Pit lap ${outcome.lapNumber}: ${outcome.signal}`}
+                      />
+                    ))}
+                  </span>
+                  <span
+                    className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] ${getStrategySignalTone(signal?.signal ?? "unavailable")}`}
+                    title={signal ? `Position before: ${signal.positionBefore ?? "--"}; after: ${signal.positionAfter ?? "--"}` : "No pit event recorded"}
+                  >
+                    {signalLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-[14px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-[10px] leading-4 text-[var(--muted)]">
+        Method: position immediately before a stop is compared with the first recorded position within four minutes after it. Undercut or overcut labels also compare that stop lap with the median lap for the field&apos;s equivalent stop. This is a directional replay signal, not proof that pit timing alone caused the gain.
       </div>
     </Panel>
   );
@@ -4050,6 +4286,22 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     note: "Refresh to load the session-scoped timing model introduced in this version.",
     entries: [],
   };
+  const strategy: DashboardData["strategy"] = data.strategy ?? {
+    session: data.telemetrySession,
+    status: "empty",
+    updatedAt: null,
+    note: "Refresh to load the session-scoped strategy replay introduced in this version.",
+    totalLaps: 0,
+    drivers: [],
+  };
+  const telemetryComparison: DashboardData["telemetryComparison"] =
+    data.telemetryComparison ?? {
+      session: data.telemetrySession,
+      status: "empty",
+      updatedAt: null,
+      note: "Refresh to load two session-matched telemetry traces.",
+      traces: [],
+    };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
   const error = query.error;
@@ -4086,11 +4338,17 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const isTelemetryPlaying = ui.isTelemetryPlaying;
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
   const scrubFrameRef = useRef<number | null>(null);
   const lastPlayFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setHasMounted(true));
+    const frame = window.requestAnimationFrame(() => {
+      setHasMounted(true);
+      setDebugMode(
+        new URLSearchParams(window.location.search).get("debug") === "1",
+      );
+    });
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
@@ -4259,6 +4517,12 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       null,
     [data.standings, effectiveSelectedDriverId],
   );
+  const telemetryDriver = useMemo(
+    () =>
+      data.standings.find((driver) => driver.id === data.telemetryDriverId) ??
+      null,
+    [data.standings, data.telemetryDriverId],
+  );
   const activeTelemetrySample =
     data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
 
@@ -4289,6 +4553,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     visualThemeOptions.find((theme) => theme.id === ui.visualTheme) ??
     visualThemeOptions[0];
   const accent = activeVisualTheme?.accent ?? "E10600";
+  const telemetryAccent = telemetryDriver?.teamColor ?? accent;
   const themeStyle = useMemo(() => buildThemeStyle(accent), [accent]);
 
   const changeVisualTheme = (themeId: string) => {
@@ -4574,9 +4839,17 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "analysis" ? (
         <div className="grid gap-4 sm:gap-5">
+          <WidgetBoundary label="Strategy replay">
+            <StrategyPanel
+              strategy={strategy}
+              selectedDriverId={effectiveSelectedDriverId}
+              onSelect={selectDriver}
+            />
+          </WidgetBoundary>
           <WidgetBoundary label="Telemetry">
             <TelemetryExperiencePanel
-              accent={accent}
+              accent={telemetryAccent}
+              debugMode={debugMode}
               driverLabel={data.telemetryDriverLabel}
               insights={data.telemetryInsights}
               isPlaying={isTelemetryPlaying}
@@ -4592,25 +4865,24 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <WidgetBoundary label="F1 telemetry suite">
             <F1TelemetrySuite
               circuitName={data.trackMap.circuitName}
-              drivers={data.standings}
-              samples={data.telemetrySamples}
+              comparison={telemetryComparison}
+              debugMode={debugMode}
               scrubIndex={effectiveScrubIndex}
-              selectedDriver={selectedDriver}
-              selectedDriverId={effectiveSelectedDriverId}
               onScrub={scrubTo}
-              onSelectDriver={selectDriver}
             />
           </WidgetBoundary>
-          <WidgetBoundary label="Advanced telemetry">
-            <AdvancedTelemetryPanel
-              activeSample={activeTelemetrySample}
-              drivers={data.standings}
-              selectedDriver={selectedDriver}
-              samples={data.telemetrySamples}
-              workerMetrics={telemetryWorkerMetrics}
-              onSelectDriver={selectDriver}
-            />
-          </WidgetBoundary>
+          {debugMode ? (
+            <WidgetBoundary label="Advanced telemetry">
+              <AdvancedTelemetryPanel
+                activeSample={activeTelemetrySample}
+                drivers={data.standings}
+                selectedDriver={selectedDriver}
+                samples={data.telemetrySamples}
+                workerMetrics={telemetryWorkerMetrics}
+                onSelectDriver={selectDriver}
+              />
+            </WidgetBoundary>
+          ) : null}
           <RaceIntelPanel intel={data.raceIntelligence} />
           <PerformanceProfilePanel driver={selectedDriver} />
         </div>
@@ -4646,6 +4918,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       ) : null}
 
       <footer className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+        {debugMode ? (
+          <span className="rounded-full border border-[#d5a125]/25 bg-[#d5a125]/10 px-3 py-1.5 text-[#8c6500]">
+            Engineering debug active
+          </span>
+        ) : null}
         <span className="glass-pill rounded-full px-3 py-1.5">
           Stable live demo
         </span>
