@@ -3,7 +3,9 @@
 import Image from "next/image";
 import {
   Activity,
+  ArrowDown,
   ArrowUpRight,
+  ArrowUp,
   CalendarDays,
   Check,
   ChevronDown,
@@ -12,6 +14,7 @@ import {
   Gauge,
   Map as MapIcon,
   MessageCircle,
+  Minus,
   Newspaper,
   Palette,
   Share2,
@@ -1193,22 +1196,6 @@ function buildConstructorStandings(drivers: DriverInsight[]) {
   });
 
   return Array.from(teams.values()).sort((a, b) => b.points - a.points);
-}
-
-function getDriverSignal(driver: DriverInsight) {
-  if (driver.standingPosition <= 3) {
-    return "Title pace";
-  }
-
-  if (driver.sentiment.score >= 74) {
-    return "Attack window";
-  }
-
-  if (driver.sentiment.delta < 0) {
-    return "Pressure";
-  }
-
-  return "Stable";
 }
 
 type TrackLayoutMarker = {
@@ -3159,104 +3146,262 @@ function DashboardTabs({
   );
 }
 
+function formatTimingGap(value: number | string | null, leader = false) {
+  if (leader) {
+    return "LEADER";
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `+${value.toFixed(3)}`;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value.startsWith("+") ? value : `+${value}`;
+  }
+
+  return "--";
+}
+
+function getSectorTone(
+  state: DashboardData["timingTower"]["entries"][number]["sectorStates"]["sector1"],
+) {
+  if (state === "overall-best") {
+    return "border-[#9b51e0]/30 bg-[#9b51e0]/14 text-[#9b51e0]";
+  }
+  if (state === "personal-best") {
+    return "border-[#00a76f]/30 bg-[#00a76f]/12 text-[#00a76f]";
+  }
+  if (state === "slower") {
+    return "border-[#d5a125]/25 bg-[#d5a125]/10 text-[#9b7416]";
+  }
+  return "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]";
+}
+
+function getCompoundTone(compound: string | null) {
+  switch (compound?.toUpperCase()) {
+    case "SOFT":
+      return { label: "S", color: "#e10600", background: "rgba(225,6,0,0.12)" };
+    case "MEDIUM":
+      return { label: "M", color: "#a87800", background: "rgba(213,161,37,0.16)" };
+    case "HARD":
+      return { label: "H", color: "var(--foreground)", background: "var(--surface-strong)" };
+    case "INTERMEDIATE":
+      return { label: "I", color: "#008f60", background: "rgba(0,167,111,0.13)" };
+    case "WET":
+      return { label: "W", color: "#3976c3", background: "rgba(57,118,195,0.13)" };
+    default:
+      return { label: "?", color: "var(--muted)", background: "var(--surface)" };
+  }
+}
+
+function PositionChange({ value }: { value: number | null }) {
+  if (value === null || value === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[9px] text-[var(--muted)]">
+        <Minus size={9} /> 0
+      </span>
+    );
+  }
+
+  const gained = value > 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[9px] font-semibold ${gained ? "text-[#00a76f]" : "text-[#c51b17]"}`}
+      title={`${Math.abs(value)} position${Math.abs(value) === 1 ? "" : "s"} ${gained ? "gained" : "lost"} since the first recorded race position`}
+    >
+      {gained ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
+      {Math.abs(value)}
+    </span>
+  );
+}
+
+function SectorCell({
+  label,
+  value,
+  state,
+}: {
+  label: string;
+  value: number | null;
+  state: DashboardData["timingTower"]["entries"][number]["sectorStates"]["sector1"];
+}) {
+  return (
+    <span
+      className={`telemetry-text inline-flex min-w-0 flex-col rounded-[8px] border px-1.5 py-1 ${getSectorTone(state)}`}
+      title={`${label}: ${state.replace("-", " ")}`}
+    >
+      <span className="text-[8px] font-semibold uppercase tracking-[0.1em] opacity-65">{label}</span>
+      <span className="mt-0.5 text-[10px] font-semibold">
+        {value === null ? "--" : value.toFixed(3)}
+      </span>
+    </span>
+  );
+}
+
 function TimingBoardPanel({
-  drivers,
+  timing,
   selectedDriverId,
   onSelect,
 }: {
-  drivers: DriverInsight[];
+  timing: DashboardData["timingTower"];
   selectedDriverId: string;
   onSelect: (driverId: string) => void;
 }) {
-  const leader = drivers[0] ?? null;
-  const biggestSignal = drivers
-    .slice()
-    .sort((a, b) => b.sentiment.score - a.sentiment.score)[0] ?? null;
+  const leader = timing.entries[0] ?? null;
+  const classifiedCount = timing.entries.filter(
+    (entry) => entry.raceStatus === "classified",
+  ).length;
+  const lapNumber = Math.max(
+    0,
+    ...timing.entries.map((entry) => entry.latestLapNumber ?? 0),
+  );
+  const sourceTone = getFeedTone(timing.status);
+
+  if (!timing.entries.length) {
+    return (
+      <Panel>
+        <div className="eyebrow">Race timing</div>
+        <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+          Timing unavailable
+        </div>
+        <div className="mt-4 rounded-[16px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-4 py-5 text-sm text-[var(--muted)]">
+          {timing.note}
+        </div>
+      </Panel>
+    );
+  }
 
   return (
     <Panel>
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="max-w-2xl">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="eyebrow">Timing</div>
-            <FunBadge label="Expanded tower" tone="accent" />
+            <div className="eyebrow">Race timing</div>
+            <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}>
+              {sourceTone.label}
+            </span>
+            <span className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+              Session replay
+            </span>
           </div>
           <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
-            Full field order
+            {timing.session
+              ? `${timing.session.circuitName} ${timing.session.sessionName}`
+              : "Full field order"}
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
-            Season positions are paired with latest completed-race pace only when a comparable lap sample exists.
+            {timing.note}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <StatChip label="Classified" value={`${drivers.length}`} />
+        <div className="grid grid-cols-3 gap-2">
+          <StatChip label="Lap" value={lapNumber ? `${lapNumber}` : "--"} />
           <StatChip label="Leader" value={leader?.abbreviation ?? "--"} accent={leader?.teamColor} />
-          <StatChip label="Hot signal" value={biggestSignal?.abbreviation ?? "--"} accent={biggestSignal?.teamColor} />
+          <StatChip label="Classified" value={`${classifiedCount}`} />
         </div>
       </div>
 
-      <div className="mt-5 overflow-x-auto hide-scrollbar">
-        <div className="min-w-[760px]">
-          <div className="grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(140px,1fr)_110px_110px_120px] gap-2 px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-            <span>Pos</span>
-            <span>Driver</span>
-            <span>Team</span>
-            <span>Replay avg</span>
-            <span>Points</span>
-            <span>Signal</span>
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-[var(--line)] py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+        <span>Sector:</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#9b51e0]" /> Overall best</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#00a76f]" /> Personal best</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#d5a125]" /> Slower</span>
+        <span className="ml-auto">Position change uses first recorded race position</span>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:hidden">
+        {timing.entries.map((entry) => {
+          const active = selectedDriverId === entry.driverId;
+          const compound = getCompoundTone(entry.compound);
+
+          return (
+            <button
+              key={entry.driverId}
+              type="button"
+              onClick={() => onSelect(entry.driverId)}
+              aria-pressed={active}
+              className={`rounded-[14px] border p-3 text-left transition ${FOCUS_RING}`}
+              style={{
+                borderColor: active ? rgba(entry.teamColor, 0.42) : "var(--line)",
+                background: active
+                  ? `linear-gradient(90deg, ${rgba(entry.teamColor, 0.15)}, var(--surface-strong))`
+                  : "var(--surface)",
+              }}
+            >
+              <span className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2.5">
+                <span className="flex flex-col">
+                  <span className="telemetry-text text-base font-semibold text-[var(--foreground)]">P{entry.position}</span>
+                  <PositionChange value={entry.positionChange} />
+                </span>
+                <span className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: `#${entry.teamColor}` }}>
+                  <span className="block truncate text-sm font-semibold text-[var(--foreground)]">{entry.abbreviation} · {entry.fullName}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-[var(--muted)]">{entry.teamName}</span>
+                </span>
+                <span className="text-right">
+                  <span className="telemetry-text block text-sm font-semibold text-[var(--foreground)]">{entry.raceStatus === "classified" ? formatTimingGap(entry.gapToLeader, entry.position === 1) : entry.raceStatus.toUpperCase()}</span>
+                  <span className="mt-0.5 block text-[9px] uppercase tracking-[0.1em] text-[var(--muted)]">Gap</span>
+                </span>
+              </span>
+              <span className="mt-3 grid grid-cols-4 gap-1.5 border-t border-[var(--line)] pt-2.5">
+                <span><span className="eyebrow block text-[8px]">Interval</span><span className="telemetry-text mt-1 block text-[11px] font-semibold">{entry.raceStatus === "classified" ? formatTimingGap(entry.interval) : "--"}</span></span>
+                <span><span className="eyebrow block text-[8px]">Last</span><span className="telemetry-text mt-1 block text-[11px] font-semibold">{formatLapTime(entry.lastLap)}</span></span>
+                <span><span className="eyebrow block text-[8px]">Tyre</span><span className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-semibold"><span className="grid h-5 w-5 place-items-center rounded-full" style={{ color: compound.color, background: compound.background }}>{compound.label}</span>{entry.tyreAge === null ? "--" : `L${entry.tyreAge}`}</span></span>
+                <span><span className="eyebrow block text-[8px]">Pit</span><span className="telemetry-text mt-1 block text-[11px] font-semibold">{entry.pitStops} stop{entry.pitStops === 1 ? "" : "s"}</span></span>
+              </span>
+              <span className="mt-2 grid grid-cols-3 gap-1.5">
+                <SectorCell label="S1" value={entry.sectors.sector1} state={entry.sectorStates.sector1} />
+                <SectorCell label="S2" value={entry.sectors.sector2} state={entry.sectorStates.sector2} />
+                <SectorCell label="S3" value={entry.sectors.sector3} state={entry.sectorStates.sector3} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 hidden overflow-x-auto hide-scrollbar md:block">
+        <div className="min-w-[1180px]">
+          <div className="grid grid-cols-[62px_minmax(170px,1.25fr)_92px_92px_102px_102px_72px_72px_72px_106px_86px] gap-2 px-3 pb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+            <span>Pos</span><span>Driver</span><span>Gap</span><span>Interval</span><span>Last lap</span><span>Best lap</span><span>S1</span><span>S2</span><span>S3</span><span>Tyre</span><span>Pit</span>
           </div>
-          <div className="grid gap-2">
-            {drivers.map((driver) => {
-              const active = selectedDriverId === driver.id;
+          <div className="grid gap-1.5">
+            {timing.entries.map((entry) => {
+              const active = selectedDriverId === entry.driverId;
+              const compound = getCompoundTone(entry.compound);
 
               return (
                 <button
-                  key={driver.id}
+                  key={entry.driverId}
                   type="button"
-                  onClick={() => onSelect(driver.id)}
+                  onClick={() => onSelect(entry.driverId)}
                   aria-pressed={active}
-                  className={`grid grid-cols-[72px_minmax(180px,1.4fr)_minmax(140px,1fr)_110px_110px_120px] items-center gap-2 rounded-[14px] border px-3 py-3 text-left transition hover:-translate-y-0.5 ${FOCUS_RING}`}
+                  className={`grid grid-cols-[62px_minmax(170px,1.25fr)_92px_92px_102px_102px_72px_72px_72px_106px_86px] items-center gap-2 rounded-[12px] border px-3 py-2 text-left transition hover:-translate-y-px ${FOCUS_RING}`}
                   style={{
-                    borderColor: active ? rgba(driver.teamColor, 0.4) : "var(--line)",
+                    borderColor: active ? rgba(entry.teamColor, 0.42) : "var(--line)",
                     background: active
-                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.16)}, var(--surface-strong))`
+                      ? `linear-gradient(90deg, ${rgba(entry.teamColor, 0.15)}, var(--surface-strong))`
                       : "var(--surface)",
                   }}
                 >
-                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
-                    P{driver.standingPosition}
+                  <span className="flex flex-col">
+                    <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">P{entry.position}</span>
+                    <PositionChange value={entry.positionChange} />
                   </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
-                      {driver.fullName}
-                    </span>
-                    <span className="telemetry-text mt-0.5 block text-[11px] text-[var(--muted)]">
-                      #{driver.permanentNumber} / {driver.abbreviation}
-                    </span>
+                  <span className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: `#${entry.teamColor}` }}>
+                    <span className="block truncate text-sm font-semibold text-[var(--foreground)]">{entry.abbreviation} · {entry.fullName}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-[var(--muted)]">#{entry.permanentNumber} · {entry.teamName}</span>
                   </span>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-7 w-1.5 rounded-full"
-                      style={{ background: `#${driver.teamColor}` }}
-                    />
-                    <span className="truncate text-xs text-[var(--muted)]">
-                      {driver.teamName}
-                    </span>
+                  <span className="telemetry-text text-xs font-semibold text-[var(--foreground)]">{entry.raceStatus === "classified" ? formatTimingGap(entry.gapToLeader, entry.position === 1) : entry.raceStatus.toUpperCase()}</span>
+                  <span className="telemetry-text text-xs text-[var(--muted)]">{entry.raceStatus === "classified" ? formatTimingGap(entry.interval) : "--"}</span>
+                  <span className="telemetry-text text-xs text-[var(--foreground)]">{formatLapTime(entry.lastLap)}</span>
+                  <span className="telemetry-text text-xs text-[var(--muted)]">{formatLapTime(entry.bestLap)}</span>
+                  <SectorCell label="S1" value={entry.sectors.sector1} state={entry.sectorStates.sector1} />
+                  <SectorCell label="S2" value={entry.sectors.sector2} state={entry.sectorStates.sector2} />
+                  <SectorCell label="S3" value={entry.sectors.sector3} state={entry.sectorStates.sector3} />
+                  <span className="inline-flex items-center gap-2">
+                    <span className="grid h-6 w-6 place-items-center rounded-full text-[10px] font-bold" style={{ color: compound.color, background: compound.background }} title={entry.compound ?? "Compound unavailable"}>{compound.label}</span>
+                    <span className="telemetry-text text-[11px] text-[var(--foreground)]">{entry.tyreAge === null ? "--" : `${entry.tyreAge}L`}</span>
                   </span>
-                  <span className="telemetry-text text-sm text-[var(--foreground)]">
-                    {driver.avgLap === null ? "No sample" : formatLapTime(driver.avgLap)}
-                  </span>
-                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
-                    {driver.points}
-                  </span>
-                  <span
-                    className="inline-flex w-fit rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]"
-                    style={{
-                      color: `#${driver.teamColor}`,
-                      background: rgba(driver.teamColor, 0.12),
-                    }}
-                  >
-                    {getDriverSignal(driver)}
+                  <span className="text-[10px] text-[var(--foreground)]">
+                    <span className="telemetry-text block font-semibold">{entry.pitStops} stop{entry.pitStops === 1 ? "" : "s"}</span>
+                    <span className="mt-0.5 block text-[9px] text-[var(--muted)]">{entry.lastPitLap === null ? entry.pitStatus : `last L${entry.lastPitLap}`}</span>
                   </span>
                 </button>
               );
@@ -3898,6 +4043,13 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const query = useGetDashboardQuery();
   const [offlineData, setOfflineData] = useState<DashboardData | null>(null);
   const data = query.data ?? offlineData ?? initialData;
+  const timingTower: DashboardData["timingTower"] = data.timingTower ?? {
+    session: data.telemetrySession,
+    status: "empty",
+    updatedAt: null,
+    note: "Refresh to load the session-scoped timing model introduced in this version.",
+    entries: [],
+  };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
   const error = query.error;
@@ -4369,25 +4521,37 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "live" ? (
         <div className="grid gap-4 sm:gap-5">
-          <HeaderHero
-            dashboard={data}
-            selectedDriver={selectedDriver}
-            freshness={freshness}
-            snapshotNow={snapshotNow}
-          />
+          <div className="order-2 md:order-1">
+            <HeaderHero
+              dashboard={data}
+              selectedDriver={selectedDriver}
+              freshness={freshness}
+              snapshotNow={snapshotNow}
+            />
+          </div>
 
-          <WidgetBoundary label="Race control">
-            <RaceControlPanel raceControl={data.raceControl} initialNow={snapshotNow} />
-          </WidgetBoundary>
+          <div className="order-3 md:order-2">
+            <WidgetBoundary label="Race control">
+              <RaceControlPanel raceControl={data.raceControl} initialNow={snapshotNow} />
+            </WidgetBoundary>
+          </div>
 
-          <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
+          <div className="order-1 md:order-3">
             <WidgetBoundary label="Live timing">
               <TimingBoardPanel
-                drivers={data.standings}
+                timing={timingTower}
                 selectedDriverId={effectiveSelectedDriverId}
                 onSelect={selectDriver}
               />
             </WidgetBoundary>
+          </div>
+
+          <div className="order-4 grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(420px,1.15fr)]">
+            <BriefingPanel
+              dashboard={data}
+              selectedDriver={selectedDriver}
+              onNavigate={setActiveTab}
+            />
             <WidgetBoundary label="Track map">
               <LiveActionDock
                 circuitName={data.trackMap.circuitName}
@@ -4405,12 +4569,6 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               />
             </WidgetBoundary>
           </div>
-
-          <BriefingPanel
-            dashboard={data}
-            selectedDriver={selectedDriver}
-            onNavigate={setActiveTab}
-          />
         </div>
       ) : null}
 
