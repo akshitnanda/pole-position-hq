@@ -733,7 +733,7 @@ export function F1TelemetrySuite({
 
   return (
     <section
-      className="f1-suite grid gap-4 rounded-[28px] border border-white/10 bg-[rgba(0,0,0,0.6)] p-4 text-white shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur-[12px] sm:p-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]"
+      className="f1-suite grid min-w-0 gap-4 rounded-[28px] border border-white/10 bg-[rgba(0,0,0,0.6)] p-4 text-white shadow-[0_30px_80px_rgba(0,0,0,0.28)] backdrop-blur-[12px] sm:p-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]"
       style={
         {
           ["--suite-accent" as string]: `#${accent}`,
@@ -742,7 +742,7 @@ export function F1TelemetrySuite({
       onPointerDown={handleGestureStart}
       onPointerUp={handleGestureEnd}
     >
-      <div className="grid gap-4">
+      <div className="grid min-w-0 gap-4">
         <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
           <Speedometer speed={activeSample?.speed ?? 0} accent={accent} />
           <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
@@ -871,6 +871,7 @@ export function F1TelemetrySuite({
                   <motion.g
                     key={corner.id}
                     transform={`translate(${corner.x}, ${corner.y})`}
+                    initial={{ opacity: 0.36 }}
                     animate={{ opacity: zoom > 0.8 || focusCorner === corner.id ? 1 : 0.36 }}
                   >
                     <circle r="9" fill="rgba(0,0,0,0.78)" stroke="rgba(255,255,255,0.28)" />
@@ -924,7 +925,7 @@ export function F1TelemetrySuite({
         </div>
       </div>
 
-      <aside className="grid content-start gap-4">
+      <aside className="grid min-w-0 content-start gap-4">
         <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
           <div className="mb-3 flex items-center justify-between">
             <div>
