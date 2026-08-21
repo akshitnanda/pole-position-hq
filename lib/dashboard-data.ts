@@ -9,6 +9,8 @@ import {
   TelemetryInsights,
   TelemetrySample,
   TimingDelta,
+  TimingSectorState,
+  TimingTowerEntry,
   TrackCar,
   UpgradeSignal,
 } from "./types";
@@ -55,6 +57,7 @@ type OpenF1Lap = {
   duration_sector_1?: number;
   duration_sector_2?: number;
   duration_sector_3?: number;
+  is_pit_out_lap?: boolean;
 };
 
 type OpenF1CarData = {
@@ -69,6 +72,39 @@ type OpenF1Position = {
   date: string;
   driver_number: number;
   position: number;
+};
+
+type OpenF1Interval = {
+  date: string;
+  driver_number: number;
+  gap_to_leader: number | string | null;
+  interval: number | string | null;
+};
+
+type OpenF1Stint = {
+  driver_number: number;
+  stint_number: number;
+  lap_start: number;
+  lap_end: number | null;
+  compound: string | null;
+  tyre_age_at_start: number | null;
+};
+
+type OpenF1Pit = {
+  date: string;
+  driver_number: number;
+  lap_number: number;
+  pit_duration: number | null;
+};
+
+type OpenF1SessionResult = {
+  driver_number: number;
+  position: number | null;
+  number_of_laps: number | null;
+  gap_to_leader: number | string | null;
+  dnf: boolean;
+  dns: boolean;
+  dsq: boolean;
 };
 
 type SeasonStandingRow = {
@@ -170,7 +206,7 @@ function resolveHeadshotUrl(value: string | null | undefined) {
 
 async function fetchJson<T>(url: string): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await fetch(url, {
         headers: {
@@ -188,10 +224,23 @@ async function fetchJson<T>(url: string): Promise<T> {
       return response.json() as Promise<T>;
     } catch (error) {
       lastError = error;
+      if (attempt < 2) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 400 * (attempt + 1) + (url.length % 173)),
+        );
+      }
     }
   }
 
   throw lastError instanceof Error ? lastError : new Error(`Request failed for ${url}`);
+}
+
+async function fetchArrayOrEmpty<T>(url: string): Promise<T[]> {
+  try {
+    return await fetchJson<T[]>(url);
+  } catch {
+    return [];
+  }
 }
 
 async function fetchGraphQL<T>(query: string): Promise<T> {
@@ -795,10 +844,11 @@ function computeDriverInsights(
       openDrivers,
     );
     const teamName = canonicalizeConstructorName(openDriver?.team_name);
+    const sessionDriverNumber = String(openDriver?.driver_number ?? permanentNumber);
     const driverLaps = laps
       .filter(
         (lap) =>
-          String(lap.driver_number) === permanentNumber &&
+          String(lap.driver_number) === sessionDriverNumber &&
           typeof lap.lap_duration === "number",
       )
       .sort((a, b) => a.lap_number - b.lap_number);
@@ -828,6 +878,7 @@ function computeDriverInsights(
       lastName: openDriver?.last_name ?? standing.driver.lastName,
       abbreviation: (openDriver?.name_acronym ?? standing.driver.abbreviation).toUpperCase(),
       permanentNumber,
+      sessionDriverNumber,
       standingPosition: standing.positionNumber ?? 99,
       standingText: standing.positionText,
       points: standing.points,
@@ -1003,7 +1054,7 @@ function buildTrackCars(
   });
 
   const byNumber = new Map(
-    insights.map((driver) => [driver.permanentNumber, driver]),
+    insights.map((driver) => [driver.sessionDriverNumber, driver]),
   );
 
   return Array.from(latestByDriver.values())
@@ -1022,6 +1073,216 @@ function buildTrackCars(
           latestByDriver.size > 1
             ? (latestByDriver.size - entry.position) / (latestByDriver.size - 1)
             : 0,
+      };
+  });
+}
+
+function minimum(values: Array<number | undefined>): number | null {
+  const filtered = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+  return filtered.length ? Math.min(...filtered) : null;
+}
+
+function getSectorState(
+  value: number | null,
+  personalBest: number | null,
+  overallBest: number | null,
+): TimingSectorState {
+  if (value === null) {
+    return "unavailable";
+  }
+
+  if (overallBest !== null && Math.abs(value - overallBest) < 0.0005) {
+    return "overall-best";
+  }
+
+  if (personalBest !== null && Math.abs(value - personalBest) < 0.0005) {
+    return "personal-best";
+  }
+
+  return "slower";
+}
+
+function buildTimingTower(
+  sessionResults: OpenF1SessionResult[],
+  positions: OpenF1Position[],
+  intervals: OpenF1Interval[],
+  stints: OpenF1Stint[],
+  pits: OpenF1Pit[],
+  laps: OpenF1Lap[],
+  insights: DriverInsight[],
+): TimingTowerEntry[] {
+  const earliestPositionByDriver = new Map<number, OpenF1Position>();
+  const latestIntervalByDriver = new Map<number, OpenF1Interval>();
+  const latestStintByDriver = new Map<number, OpenF1Stint>();
+  const lapsByDriver = new Map<number, OpenF1Lap[]>();
+  const pitsByDriver = new Map<number, OpenF1Pit[]>();
+
+  positions.forEach((entry) => {
+    const earliest = earliestPositionByDriver.get(entry.driver_number);
+    if (!earliest || entry.date < earliest.date) {
+      earliestPositionByDriver.set(entry.driver_number, entry);
+    }
+  });
+
+  intervals.forEach((entry) => {
+    const latest = latestIntervalByDriver.get(entry.driver_number);
+    if (!latest || entry.date > latest.date) {
+      latestIntervalByDriver.set(entry.driver_number, entry);
+    }
+  });
+
+  stints.forEach((entry) => {
+    const latest = latestStintByDriver.get(entry.driver_number);
+    if (
+      !latest ||
+      entry.stint_number > latest.stint_number ||
+      (entry.stint_number === latest.stint_number &&
+        (entry.lap_end ?? entry.lap_start) > (latest.lap_end ?? latest.lap_start))
+    ) {
+      latestStintByDriver.set(entry.driver_number, entry);
+    }
+  });
+
+  laps.forEach((lap) => {
+    const driverLaps = lapsByDriver.get(lap.driver_number) ?? [];
+    driverLaps.push(lap);
+    lapsByDriver.set(lap.driver_number, driverLaps);
+  });
+
+  pits.forEach((pit) => {
+    const driverPits = pitsByDriver.get(pit.driver_number) ?? [];
+    driverPits.push(pit);
+    pitsByDriver.set(pit.driver_number, driverPits);
+  });
+
+  const overallSectorBests = {
+    sector1: minimum(laps.map((lap) => lap.duration_sector_1)),
+    sector2: minimum(laps.map((lap) => lap.duration_sector_2)),
+    sector3: minimum(laps.map((lap) => lap.duration_sector_3)),
+  };
+  const driversByNumber = new Map(
+    insights.map((driver) => [Number(driver.sessionDriverNumber), driver]),
+  );
+  const orderedResults = sessionResults
+    .map((result, index) => ({
+      result,
+      position: result.position ?? index + 1,
+    }))
+    .sort((a, b) => a.position - b.position);
+
+  return orderedResults.map(({ result, position }, index): TimingTowerEntry => {
+      const driverNumber = result.driver_number;
+      const driver = driversByNumber.get(driverNumber);
+      const earliestPosition = earliestPositionByDriver.get(driverNumber);
+      const interval = latestIntervalByDriver.get(driverNumber);
+      const previousResult = orderedResults[index - 1]?.result ?? null;
+      const derivedInterval =
+        typeof result.gap_to_leader === "number" &&
+        typeof previousResult?.gap_to_leader === "number"
+          ? Number(
+              (result.gap_to_leader - previousResult.gap_to_leader).toFixed(3),
+            )
+          : null;
+      const driverLaps = (lapsByDriver.get(driverNumber) ?? []).sort(
+        (a, b) => a.lap_number - b.lap_number,
+      );
+      const timedLaps = driverLaps.filter(
+        (lap) =>
+          typeof lap.lap_duration === "number" &&
+          Number.isFinite(lap.lap_duration) &&
+          !lap.is_pit_out_lap,
+      );
+      const latestLap = timedLaps.at(-1) ?? null;
+      const bestLap = timedLaps
+        .slice()
+        .sort(
+          (a, b) =>
+            (a.lap_duration ?? Number.POSITIVE_INFINITY) -
+            (b.lap_duration ?? Number.POSITIVE_INFINITY),
+        )[0] ?? null;
+      const personalSectorBests = {
+        sector1: minimum(driverLaps.map((lap) => lap.duration_sector_1)),
+        sector2: minimum(driverLaps.map((lap) => lap.duration_sector_2)),
+        sector3: minimum(driverLaps.map((lap) => lap.duration_sector_3)),
+      };
+      const sectors = {
+        sector1: latestLap?.duration_sector_1 ?? null,
+        sector2: latestLap?.duration_sector_2 ?? null,
+        sector3: latestLap?.duration_sector_3 ?? null,
+      };
+      const stint = latestStintByDriver.get(driverNumber) ?? null;
+      const latestRecordedLap = driverLaps.at(-1) ?? null;
+      const latestLapNumber =
+        result.number_of_laps ?? latestRecordedLap?.lap_number ?? null;
+      const driverPits = (pitsByDriver.get(driverNumber) ?? []).sort(
+        (a, b) => a.lap_number - b.lap_number,
+      );
+      const tyreAge =
+        stint && latestLapNumber !== null
+          ? Math.max(
+              0,
+              (stint.tyre_age_at_start ?? 0) + latestLapNumber - stint.lap_start + 1,
+            )
+          : null;
+
+      return {
+        driverId: driver?.id ?? `driver-${driverNumber}`,
+        fullName: driver?.fullName ?? `Driver ${driverNumber}`,
+        abbreviation: driver?.abbreviation ?? String(driverNumber),
+        permanentNumber: driver?.permanentNumber ?? String(driverNumber),
+        teamName: driver?.teamName ?? "Constructor unavailable",
+        teamColor: normalizeTeamColor(driver?.teamColor ?? "697386"),
+        position,
+        positionChange: earliestPosition
+          ? earliestPosition.position - position
+          : null,
+        gapToLeader:
+          position === 1
+            ? 0
+            : result.gap_to_leader ?? interval?.gap_to_leader ?? null,
+        interval:
+          position === 1 ? null : interval?.interval ?? derivedInterval,
+        lastLap: latestLap?.lap_duration ?? null,
+        bestLap: bestLap?.lap_duration ?? null,
+        sectors,
+        sectorStates: {
+          sector1: getSectorState(
+            sectors.sector1,
+            personalSectorBests.sector1,
+            overallSectorBests.sector1,
+          ),
+          sector2: getSectorState(
+            sectors.sector2,
+            personalSectorBests.sector2,
+            overallSectorBests.sector2,
+          ),
+          sector3: getSectorState(
+            sectors.sector3,
+            personalSectorBests.sector3,
+            overallSectorBests.sector3,
+          ),
+        },
+        compound: stint?.compound ?? null,
+        tyreAge,
+        stintNumber: stint?.stint_number ?? null,
+        pitStops: driverPits.length,
+        lastPitLap: driverPits.at(-1)?.lap_number ?? null,
+        pitStatus:
+          latestRecordedLap?.is_pit_out_lap === true
+            ? "pit-out"
+            : latestRecordedLap
+              ? "track"
+              : "unavailable",
+        raceStatus: result.dsq
+          ? "dsq"
+          : result.dns
+            ? "dns"
+            : result.dnf
+              ? "dnf"
+              : "classified",
+        latestLapNumber,
       };
     });
 }
@@ -1189,6 +1450,7 @@ function buildFallbackDriverInsights(openDrivers: OpenF1Driver[]): DriverInsight
       lastName: driver.last_name,
       abbreviation: driver.name_acronym.toUpperCase(),
       permanentNumber: String(driver.driver_number),
+      sessionDriverNumber: String(driver.driver_number),
       standingPosition: index + 1,
       standingText: String(index + 1),
       points: 0,
@@ -1527,22 +1789,51 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const telemetrySession = recentRaceSession ? mapSession(recentRaceSession) : null;
 
-  const [lapsResult, positionsResult] = recentRaceSession
-    ? await Promise.allSettled([
-        fetchJson<OpenF1Lap[]>(
-          `${OPEN_F1_BASE}/laps?session_key=${recentRaceSession.session_key}`,
-        ),
-        fetchJson<OpenF1Position[]>(
-          `${OPEN_F1_BASE}/position?session_key=${recentRaceSession.session_key}`,
-        ),
-      ])
-    : [
-        { status: "fulfilled", value: [] } as PromiseFulfilledResult<OpenF1Lap[]>,
-        { status: "fulfilled", value: [] } as PromiseFulfilledResult<OpenF1Position[]>,
-      ];
-  const laps = lapsResult.status === "fulfilled" ? lapsResult.value : [];
-  const positions =
-    positionsResult.status === "fulfilled" ? positionsResult.value : [];
+  const intervalWindowStart = recentRaceSession
+    ? new Date(
+        new Date(recentRaceSession.date_end).getTime() - 40 * 60_000,
+      ).toISOString()
+    : null;
+  const positionWindowEnd = recentRaceSession
+    ? new Date(
+        new Date(recentRaceSession.date_start).getTime() + 10 * 60_000,
+      ).toISOString()
+    : null;
+  const sessionResults = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1SessionResult>(
+        `${OPEN_F1_BASE}/session_result?session_key=${recentRaceSession.session_key}`,
+      )
+    : [];
+  const intervals = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1Interval>(
+        `${OPEN_F1_BASE}/intervals?session_key=${recentRaceSession.session_key}&date>=${encodeURIComponent(intervalWindowStart ?? recentRaceSession.date_start)}`,
+      )
+    : [];
+  const laps = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1Lap>(
+        `${OPEN_F1_BASE}/laps?session_key=${recentRaceSession.session_key}`,
+      )
+    : [];
+  const startingPositions = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1Position>(
+        `${OPEN_F1_BASE}/position?session_key=${recentRaceSession.session_key}&date>=${encodeURIComponent(recentRaceSession.date_start)}&date<=${encodeURIComponent(positionWindowEnd ?? recentRaceSession.date_end)}`,
+      )
+    : [];
+  const stints = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1Stint>(
+        `${OPEN_F1_BASE}/stints?session_key=${recentRaceSession.session_key}`,
+      )
+    : [];
+  const pits = recentRaceSession
+    ? await fetchArrayOrEmpty<OpenF1Pit>(
+        `${OPEN_F1_BASE}/pit?session_key=${recentRaceSession.session_key}`,
+      )
+    : [];
+  const finalPositions: OpenF1Position[] = sessionResults.map((result, index) => ({
+    date: recentRaceSession?.date_end ?? generatedAt,
+    driver_number: result.driver_number,
+    position: result.position ?? index + 1,
+  }));
 
   const driverInsights = standingsRows.length
     ? computeDriverInsights(standingsRows, fallbackDrivers, laps)
@@ -1555,7 +1846,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     const telemetryLaps = laps
       .filter(
         (lap) =>
-          String(lap.driver_number) === telemetryDriver.permanentNumber &&
+          String(lap.driver_number) === telemetryDriver.sessionDriverNumber &&
           typeof lap.lap_duration === "number" &&
           typeof lap.date_start === "string",
       )
@@ -1575,7 +1866,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           `${OPEN_F1_BASE}/car_data?session_key=${
             recentRaceSession.session_key
           }&driver_number=${
-            telemetryDriver.permanentNumber
+            telemetryDriver.sessionDriverNumber
           }&date>=${encodeURIComponent(
             new Date(startMs).toISOString(),
           )}&date<${encodeURIComponent(new Date(endMs).toISOString())}`,
@@ -1589,7 +1880,16 @@ export async function getDashboardData(): Promise<DashboardData> {
   }
 
   const telemetryInsights = buildTelemetryInsights(telemetrySamples);
-  const trackCars = buildTrackCars(positions, driverInsights);
+  const trackCars = buildTrackCars(finalPositions, driverInsights);
+  const timingEntries = buildTimingTower(
+    sessionResults,
+    startingPositions,
+    intervals,
+    stints,
+    pits,
+    laps,
+    driverInsights,
+  );
   const mapContextSession =
     recentRaceSession && (telemetrySamples.length || trackCars.length)
       ? recentRaceSession
@@ -1624,6 +1924,15 @@ export async function getDashboardData(): Promise<DashboardData> {
     telemetrySamples,
     telemetryInsights,
     standings: driverInsights,
+    timingTower: {
+      session: telemetrySession,
+      status: timingEntries.length ? "cached" : "empty",
+      updatedAt: timingEntries.length ? generatedAt : null,
+      note: timingEntries.length
+        ? `Archived ${telemetrySession?.sessionName ?? "race"} timing from OpenF1. Gaps, sectors, tyre stints, and pit events are session-scoped replay data.`
+        : "No session-matched timing, stint, or pit data is available in this snapshot.",
+      entries: timingEntries,
+    },
     trackMap: {
       circuitName: mapCircuitName,
       layoutKey: buildTrackLayoutKey(mapCircuitName),

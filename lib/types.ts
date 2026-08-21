@@ -20,6 +20,7 @@ export type DriverInsight = {
   lastName: string;
   abbreviation: string;
   permanentNumber: string;
+  sessionDriverNumber: string;
   standingPosition: number;
   standingText: string;
   points: number;
@@ -178,6 +179,45 @@ export type LiveTimingState = {
   latencyMs: number;
 };
 
+export type TimingSectorState =
+  | "overall-best"
+  | "personal-best"
+  | "slower"
+  | "unavailable";
+
+export type TimingTowerEntry = {
+  driverId: string;
+  fullName: string;
+  abbreviation: string;
+  permanentNumber: string;
+  teamName: string;
+  teamColor: string;
+  position: number;
+  positionChange: number | null;
+  gapToLeader: number | string | null;
+  interval: number | string | null;
+  lastLap: number | null;
+  bestLap: number | null;
+  sectors: {
+    sector1: number | null;
+    sector2: number | null;
+    sector3: number | null;
+  };
+  sectorStates: {
+    sector1: TimingSectorState;
+    sector2: TimingSectorState;
+    sector3: TimingSectorState;
+  };
+  compound: string | null;
+  tyreAge: number | null;
+  stintNumber: number | null;
+  pitStops: number;
+  lastPitLap: number | null;
+  pitStatus: "track" | "pit-out" | "unavailable";
+  raceStatus: "classified" | "dnf" | "dns" | "dsq";
+  latestLapNumber: number | null;
+};
+
 export type DataFeedStatus = "live" | "cached" | "simulated" | "fallback" | "empty";
 
 export type DashboardFeedMeta = {
@@ -199,6 +239,13 @@ export type DashboardData = {
   telemetrySamples: TelemetrySample[];
   telemetryInsights: TelemetryInsights | null;
   standings: DriverInsight[];
+  timingTower: {
+    session: SessionSummary | null;
+    status: DataFeedStatus;
+    updatedAt: string | null;
+    note: string;
+    entries: TimingTowerEntry[];
+  };
   trackMap: {
     circuitName: string;
     layoutKey: string;
