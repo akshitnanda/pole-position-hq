@@ -421,6 +421,50 @@ function StatChip({
   );
 }
 
+function DriverAvatar({
+  driver,
+  className,
+  sizes,
+  style,
+}: {
+  driver: DriverInsight;
+  className: string;
+  sizes: string;
+  style?: CSSProperties;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = Boolean(driver.headshotUrl) && failedUrl !== driver.headshotUrl;
+
+  return (
+    <div
+      className={`relative grid shrink-0 place-items-center overflow-hidden bg-[var(--surface-strong)] ${className}`}
+      style={{
+        background: `linear-gradient(145deg, ${rgba(driver.teamColor, 0.22)}, var(--surface-strong))`,
+        ...style,
+      }}
+    >
+      {showImage ? (
+        <Image
+          src={driver.headshotUrl as string}
+          alt={driver.fullName}
+          fill
+          className="object-cover"
+          sizes={sizes}
+          onError={() => setFailedUrl(driver.headshotUrl)}
+        />
+      ) : (
+        <span
+          className="telemetry-text text-sm font-semibold tracking-[0.08em]"
+          style={{ color: `#${driver.teamColor}` }}
+          aria-label={`${driver.fullName} headshot unavailable`}
+        >
+          {driver.abbreviation}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function MiniStat({
   icon,
   label,
@@ -1718,18 +1762,12 @@ function PerformanceProfilePanel({
       <div className="grid gap-4 sm:gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="minimal-card team-tint rounded-[20px] p-4 sm:rounded-[22px]">
           <div className="flex items-start gap-4">
-            <div
-              className="relative h-18 w-18 overflow-hidden rounded-[18px] border border-black/8 bg-white sm:h-20 sm:w-20 sm:rounded-[20px]"
+            <DriverAvatar
+              driver={driver}
+              className="h-18 w-18 rounded-[18px] border border-black/8 sm:h-20 sm:w-20 sm:rounded-[20px]"
+              sizes="80px"
               style={{ boxShadow: `0 14px 28px ${rgba(accent, 0.12)}` }}
-            >
-              <Image
-                src={driver.headshotUrl}
-                alt={driver.fullName}
-                fill
-                className="object-cover"
-                sizes="80px"
-              />
-            </div>
+            />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <div
@@ -2656,12 +2694,10 @@ function LiveActionDock({
 
         {selectedDriver ? (
           <div className="minimal-card mt-3 grid grid-cols-[54px_minmax(0,1fr)] items-center gap-3 rounded-[18px] p-3">
-            <Image
-              src={selectedDriver.headshotUrl}
-              alt=""
-              width={54}
-              height={54}
-              className="h-[54px] w-[54px] rounded-full border border-black/6 bg-white object-cover"
+            <DriverAvatar
+              driver={selectedDriver}
+              className="h-[54px] w-[54px] rounded-full border border-black/6"
+              sizes="54px"
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
