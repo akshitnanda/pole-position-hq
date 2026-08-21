@@ -524,42 +524,76 @@ function TelemetryPlot({
 
   const width = 620;
   const height = 240;
-  const padding = 14;
+  const padding = { top: 14, right: 42, bottom: 28, left: 48 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const speeds = samples.map((sample) => sample.speed);
+  const speedMin = Math.max(0, Math.floor((Math.min(...speeds) - 10) / 20) * 20);
+  const speedMax = Math.ceil((Math.max(...speeds) + 10) / 20) * 20;
 
-  const buildPoints = (values: number[]) => {
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+  const buildPoints = (values: number[], min: number, max: number) => {
     const range = Math.max(1, max - min);
 
     return values.map((value, index) => {
       const x =
-        padding +
-        (index / Math.max(1, values.length - 1)) * (width - padding * 2);
+        padding.left +
+        (index / Math.max(1, values.length - 1)) * plotWidth;
       const y =
-        height -
-        padding -
-        ((value - min) / range) * (height - padding * 2);
+        padding.top + plotHeight - ((value - min) / range) * plotHeight;
       return { x, y };
     });
   };
 
-  const speed = buildPoints(samples.map((sample) => sample.speed));
-  const throttle = buildPoints(samples.map((sample) => sample.throttle));
-  const brake = buildPoints(samples.map((sample) => sample.brake));
+  const speed = buildPoints(speeds, speedMin, speedMax);
+  const throttle = buildPoints(samples.map((sample) => sample.throttle), 0, 100);
+  const brake = buildPoints(samples.map((sample) => sample.brake), 0, 100);
   const activePoint = speed[Math.min(activeIndex, speed.length - 1)];
-  const segmentWidth = (width - padding * 2) / Math.max(1, samples.length - 1);
+  const segmentWidth = plotWidth / Math.max(1, samples.length - 1);
+  const yTicks = [0, 0.5, 1];
+  const xTicks = [0, 0.5, 1];
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-full w-full">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-full w-full"
+      role="img"
+      aria-label="Telemetry trace with speed in kilometers per hour and throttle and brake in percent across lap distance"
+    >
+      <title>Speed, throttle, and brake across normalized lap distance</title>
+      {yTicks.map((ratio) => {
+        const y = padding.top + plotHeight - ratio * plotHeight;
+        const speedValue = Math.round(speedMin + ratio * (speedMax - speedMin));
+        const percentValue = Math.round(ratio * 100);
+        return (
+          <g key={`y-${ratio}`}>
+            <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(17,21,29,0.08)" />
+            <text x={padding.left - 7} y={y + 3} textAnchor="end" fontSize="9" fill="var(--muted)">{speedValue}</text>
+            <text x={width - padding.right + 7} y={y + 3} fontSize="9" fill="var(--muted)">{percentValue}%</text>
+          </g>
+        );
+      })}
+      {xTicks.map((ratio) => (
+        <text
+          key={`x-${ratio}`}
+          x={padding.left + ratio * plotWidth}
+          y={height - 6}
+          textAnchor={ratio === 0 ? "start" : ratio === 1 ? "end" : "middle"}
+          fontSize="9"
+          fill="var(--muted)"
+        >
+          {Math.round(ratio * 100)}% lap
+        </text>
+      ))}
+      <text x={padding.left} y={10} fontSize="8" fill="var(--muted)">km/h</text>
       {samples.map((sample, index) => {
         const tone = getPhaseTone(sample.phase);
-        const x = padding + index * segmentWidth - segmentWidth / 2;
+        const x = padding.left + index * segmentWidth - segmentWidth / 2;
 
         return (
           <rect
             key={`phase-${sample.index}`}
-            x={Math.max(padding, x)}
-            y={height - 20}
+            x={Math.max(padding.left, x)}
+            y={height - padding.bottom + 5}
             width={Math.max(4, segmentWidth)}
             height="8"
             rx="4"
@@ -570,8 +604,8 @@ function TelemetryPlot({
       <line
         x1={activePoint.x}
         x2={activePoint.x}
-        y1={10}
-        y2={height - 10}
+        y1={padding.top}
+        y2={height - padding.bottom}
         stroke="rgba(17,21,29,0.12)"
         strokeDasharray="4 4"
       />
@@ -594,7 +628,8 @@ function TelemetryPlot({
       <polyline
         points={brake.map((point) => `${point.x},${point.y}`).join(" ")}
         fill="none"
-        stroke="rgba(18, 21, 29, 0.42)"
+        stroke="var(--muted)"
+        opacity="0.78"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -1987,19 +2022,19 @@ function TelemetryExperiencePanel({
                   className="h-2 w-2 rounded-full"
                   style={{ background: rgba(accent, 0.95) }}
                 />
-                Speed
+                Speed (km/h)
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-                Throttle
+                <span className="h-2 w-2 rounded-full bg-[#e10600]" />
+                Throttle (%)
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[var(--track)]/50" />
-                Brake
+                <span className="h-2 w-2 rounded-full bg-[var(--muted)]" />
+                Brake (%)
               </span>
             </div>
             <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]/80 sm:ml-auto">
-              drag or hover to sync the map
+              {debugMode ? "drag or hover to sync the map" : "drag or hover to inspect the lap"}
             </span>
           </div>
           <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>

@@ -14,7 +14,13 @@ import {
   type ChartOptions,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
-import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
+import {
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "framer-motion";
 import {
   Gauge,
   Maximize2,
@@ -259,9 +265,11 @@ function useReplayBuffer(scrubIndex: number, onScrub: (index: number) => void) {
 }
 
 function Speedometer({ speed, accent }: { speed: number; accent: string }) {
+  const reduceMotion = useReducedMotion();
   const rawSpeed = useMotionValue(speed);
   const springSpeed = useSpring(rawSpeed, { stiffness: 180, damping: 18 });
-  const needleRotation = useTransform(springSpeed, [0, 360], [-124, 124]);
+  const springRotation = useTransform(springSpeed, [0, 360], [-124, 124]);
+  const directRotation = useTransform(rawSpeed, [0, 360], [-124, 124]);
 
   useEffect(() => {
     rawSpeed.set(speed);
@@ -293,7 +301,10 @@ function Speedometer({ speed, accent }: { speed: number; accent: string }) {
           stroke="#fff"
           strokeWidth="5"
           strokeLinecap="round"
-          style={{ rotate: needleRotation, transformOrigin: "110px 146px" }}
+          style={{
+            rotate: reduceMotion ? directRotation : springRotation,
+            transformOrigin: "110px 146px",
+          }}
         />
         <circle cx="110" cy="146" r="10" fill="#fff" />
       </svg>
@@ -382,6 +393,7 @@ export function F1TelemetrySuite({
   const [focusCorner, setFocusCorner] = useState<number | null>(null);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const reduceMotion = useReducedMotion();
   const primaryTrace = comparison.traces[0] ?? null;
   const compareTrace = comparison.traces[1] ?? null;
   const samples = primaryTrace?.samples ?? EMPTY_TELEMETRY_SAMPLES;
@@ -513,11 +525,21 @@ export function F1TelemetrySuite({
         x: {
           ticks: { color: "rgba(255,255,255,0.42)", maxTicksLimit: 6 },
           grid: { color: "rgba(255,255,255,0.06)" },
+          title: {
+            display: true,
+            text: "Lap distance",
+            color: "rgba(255,255,255,0.48)",
+          },
         },
         speed: {
           position: "left",
           ticks: { color: "rgba(255,255,255,0.48)" },
           grid: { color: "rgba(255,255,255,0.08)" },
+          title: {
+            display: true,
+            text: "Speed (km/h)",
+            color: "rgba(255,255,255,0.48)",
+          },
         },
         percent: {
           position: "right",
@@ -525,6 +547,11 @@ export function F1TelemetrySuite({
           max: 100,
           ticks: { color: "rgba(255,255,255,0.42)" },
           grid: { drawOnChartArea: false },
+          title: {
+            display: true,
+            text: "Pedal (%)",
+            color: "rgba(255,255,255,0.48)",
+          },
         },
       },
       onHover: (_event, elements) => {
@@ -607,15 +634,16 @@ export function F1TelemetrySuite({
           <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Chart.js trace</div>
+                <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Telemetry comparison</div>
                 <h3 className="mt-1 font-[var(--font-display)] text-[clamp(1.1rem,2vw,1.65rem)] font-semibold">
-                  Speed / throttle / brake
+                  Speed and pedal trace
                 </h3>
               </div>
               <motion.div
                 key={`${activeSample?.index ?? 0}-${activeSample?.deltaSpeed ?? 0}`}
-                initial={{ scale: 0.92 }}
+                initial={reduceMotion ? false : { scale: 0.92 }}
                 animate={{ scale: 1 }}
+                transition={reduceMotion ? { duration: 0 } : undefined}
                 className={`telemetry-text rounded-full px-3 py-1 text-xs font-semibold ${
                   (activeSample?.deltaSpeed ?? 0) >= 0
                     ? "bg-[#00a76f]/15 text-[#00d68f]"
@@ -632,7 +660,7 @@ export function F1TelemetrySuite({
           </div>
         </div>
 
-        <div
+        {debugMode ? <div
           className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]"
           onTouchMove={handlePinch}
           onTouchEnd={() => {
@@ -641,7 +669,7 @@ export function F1TelemetrySuite({
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">{circuitName} circuit map</div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Montreal reference geometry</div>
               <h3 className="mt-1 font-[var(--font-display)] text-[clamp(1.15rem,2vw,1.75rem)] font-semibold">
                 Sector heat + live trail
               </h3>
@@ -670,7 +698,7 @@ export function F1TelemetrySuite({
               viewBox="0 0 560 320"
               className="h-[320px] w-full touch-none rounded-[20px] bg-[radial-gradient(circle_at_50%_30%,rgba(255,255,255,0.08),transparent_62%)]"
               role="img"
-              aria-label={`${circuitName} SVG circuit map`}
+              aria-label="Montreal reference SVG circuit map for engineering diagnostics"
             >
               <defs>
                 <linearGradient id="sector-gradient" x1="0" x2="1" y1="0" y2="1">
@@ -730,8 +758,9 @@ export function F1TelemetrySuite({
                   <motion.g
                     key={corner.id}
                     transform={`translate(${corner.x}, ${corner.y})`}
-                    initial={{ opacity: 0.36 }}
+                    initial={reduceMotion ? false : { opacity: 0.36 }}
                     animate={{ opacity: zoom > 0.8 || focusCorner === corner.id ? 1 : 0.36 }}
+                    transition={reduceMotion ? { duration: 0 } : undefined}
                   >
                     <circle r="9" fill="rgba(0,0,0,0.78)" stroke="rgba(255,255,255,0.28)" />
                     <text x="14" y="4" fill="white" fontSize="10" fontWeight="700">
@@ -759,7 +788,11 @@ export function F1TelemetrySuite({
                 {activePoint ? (
                   <motion.g
                     animate={{ x: activePoint.x, y: activePoint.y }}
-                    transition={{ type: "spring", stiffness: 180, damping: 20 }}
+                    transition={
+                      reduceMotion
+                        ? { duration: 0 }
+                        : { type: "spring", stiffness: 180, damping: 20 }
+                    }
                     filter="url(#glow-dot)"
                   >
                     <circle r="20" fill={rgba(accent, 0.2)} />
@@ -781,7 +814,7 @@ export function F1TelemetrySuite({
               zoom={zoom}
             />
           </div>
-        </div>
+        </div> : null}
       </div>
 
       <aside className="grid min-w-0 content-start gap-4">
