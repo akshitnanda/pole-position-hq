@@ -1793,6 +1793,7 @@ function PerformanceProfilePanel({
 
 function TelemetryExperiencePanel({
   accent,
+  debugMode,
   driverLabel,
   insights,
   isPlaying,
@@ -1805,6 +1806,7 @@ function TelemetryExperiencePanel({
   onScrub,
 }: {
   accent: string;
+  debugMode: boolean;
   driverLabel: string | null;
   insights: DashboardData["telemetryInsights"];
   isPlaying: boolean;
@@ -1955,7 +1957,7 @@ function TelemetryExperiencePanel({
         />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+      <div className={`mt-4 grid gap-4 ${debugMode ? "lg:grid-cols-[minmax(0,1fr)_180px]" : "grid-cols-1"}`}>
         <div
           ref={chartRef}
           className={`minimal-card telemetry-scrubber signal-sheen rounded-[22px] p-4 select-none sm:cursor-crosshair ${FOCUS_RING}`}
@@ -2001,7 +2003,7 @@ function TelemetryExperiencePanel({
             </span>
           </div>
           <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>
-          <div className="mb-3 grid gap-2 sm:grid-cols-4">
+          <div className={`mb-3 grid gap-2 ${debugMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <div className="glass-pill rounded-[16px] px-3 py-2.5">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
                 Scrub speed
@@ -2029,14 +2031,16 @@ function TelemetryExperiencePanel({
                 {phaseTone?.label ?? "--"}
               </div>
             </div>
-            <div className="glass-pill rounded-[16px] px-3 py-2.5">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                Worker delta
+            {debugMode ? (
+              <div className="glass-pill rounded-[16px] px-3 py-2.5">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Worker delta
+                </div>
+                <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
+                  {workerMetrics ? formatDeltaSpeed(workerMetrics.maxDelta) : "--"}
+                </div>
               </div>
-              <div className="telemetry-text mt-1 text-sm font-semibold text-[var(--foreground)]">
-                {workerMetrics ? formatDeltaSpeed(workerMetrics.maxDelta) : "--"}
-              </div>
-            </div>
+            ) : null}
           </div>
           <div className="h-[240px] sm:h-[290px]">
             <TelemetryPlot
@@ -2047,7 +2051,7 @@ function TelemetryExperiencePanel({
           </div>
         </div>
 
-        <div className="minimal-card rounded-[22px] p-4">
+        {debugMode ? <div className="minimal-card rounded-[22px] p-4">
           <div className="eyebrow">Load circle</div>
           <div className="section-title mt-2 text-base font-semibold">Pit wall metrics</div>
           <div className="mt-4 flex justify-center">
@@ -2094,7 +2098,7 @@ function TelemetryExperiencePanel({
               }
             />
           </div>
-        </div>
+        </div> : null}
       </div>
     </Panel>
   );
@@ -4299,11 +4303,17 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const isTelemetryPlaying = ui.isTelemetryPlaying;
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
   const scrubFrameRef = useRef<number | null>(null);
   const lastPlayFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setHasMounted(true));
+    const frame = window.requestAnimationFrame(() => {
+      setHasMounted(true);
+      setDebugMode(
+        new URLSearchParams(window.location.search).get("debug") === "1",
+      );
+    });
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
@@ -4804,6 +4814,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <WidgetBoundary label="Telemetry">
             <TelemetryExperiencePanel
               accent={telemetryAccent}
+              debugMode={debugMode}
               driverLabel={data.telemetryDriverLabel}
               insights={data.telemetryInsights}
               isPlaying={isTelemetryPlaying}
@@ -4820,20 +4831,23 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             <F1TelemetrySuite
               circuitName={data.trackMap.circuitName}
               comparison={telemetryComparison}
+              debugMode={debugMode}
               scrubIndex={effectiveScrubIndex}
               onScrub={scrubTo}
             />
           </WidgetBoundary>
-          <WidgetBoundary label="Advanced telemetry">
-            <AdvancedTelemetryPanel
-              activeSample={activeTelemetrySample}
-              drivers={data.standings}
-              selectedDriver={selectedDriver}
-              samples={data.telemetrySamples}
-              workerMetrics={telemetryWorkerMetrics}
-              onSelectDriver={selectDriver}
-            />
-          </WidgetBoundary>
+          {debugMode ? (
+            <WidgetBoundary label="Advanced telemetry">
+              <AdvancedTelemetryPanel
+                activeSample={activeTelemetrySample}
+                drivers={data.standings}
+                selectedDriver={selectedDriver}
+                samples={data.telemetrySamples}
+                workerMetrics={telemetryWorkerMetrics}
+                onSelectDriver={selectDriver}
+              />
+            </WidgetBoundary>
+          ) : null}
           <RaceIntelPanel intel={data.raceIntelligence} />
           <PerformanceProfilePanel driver={selectedDriver} />
         </div>
@@ -4869,6 +4883,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       ) : null}
 
       <footer className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--muted)]">
+        {debugMode ? (
+          <span className="rounded-full border border-[#d5a125]/25 bg-[#d5a125]/10 px-3 py-1.5 text-[#8c6500]">
+            Engineering debug active
+          </span>
+        ) : null}
         <span className="glass-pill rounded-full px-3 py-1.5">
           Stable live demo
         </span>
