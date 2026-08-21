@@ -1226,8 +1226,8 @@ function BriefingPanel({
         <BriefingAction
           icon={<Wrench size={16} />}
           eyebrow="Upgrade watch"
-          title={topUpgrade ? `${topUpgrade.teamName}: ${topUpgrade.package}` : "Upgrade model warming up"}
-          meta={topUpgrade ? `${topUpgrade.impact} impact / ${topUpgrade.confidence}% confidence` : dashboard.raceIntelligence.raceLabel}
+          title={topUpgrade ? `${topUpgrade.teamName}: ${topUpgrade.package}` : "No sourced upgrade signal"}
+          meta={topUpgrade ? `${topUpgrade.impact} impact / ${topUpgrade.confidence}% confidence` : "Editorial evidence required"}
           accent={topUpgrade?.teamColor}
           onClick={() => onNavigate("analysis")}
         />
@@ -3500,6 +3500,109 @@ function getStrategySignalTone(
   return "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]";
 }
 
+function TelemetryComparisonPanel({
+  comparison,
+}: {
+  comparison: DashboardData["telemetryComparison"];
+}) {
+  const [reference, challenger] = comparison.traces;
+  const sourceTone = getFeedTone(comparison.status);
+  const lapDelta =
+    reference && challenger ? challenger.lapTime - reference.lapTime : null;
+
+  return (
+    <Panel tint="var(--team-accent-wash)">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="eyebrow">Comparison</div>
+          <div className="section-title mt-2 text-xl font-semibold">
+            Fastest-lap reference
+          </div>
+          <div className="section-copy mt-1 text-[13px]">
+            {comparison.session?.circuitName ?? "Session-matched traces"}
+          </div>
+        </div>
+        <span
+          className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}
+        >
+          {sourceTone.label}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-2.5">
+        {comparison.traces.length ? (
+          comparison.traces.slice(0, 2).map((trace, index) => {
+            const peakSpeed = trace.samples.reduce(
+              (peak, sample) => Math.max(peak, sample.speed),
+              0,
+            );
+
+            return (
+              <div
+                key={`${trace.driverId}-${trace.lapNumber}`}
+                className="minimal-card rounded-[18px] p-3.5"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className="telemetry-text grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-semibold"
+                      style={{
+                        background: rgba(trace.teamColor, 0.14),
+                        color: `#${trace.teamColor}`,
+                      }}
+                    >
+                      {trace.abbreviation}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
+                        {trace.driverLabel}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                        Lap {trace.lapNumber} / {trace.samples.length} samples
+                      </span>
+                    </span>
+                  </div>
+                  <span className="text-right">
+                    <span className="telemetry-text block text-sm font-semibold text-[var(--foreground)]">
+                      {formatLapTime(trace.lapTime)}
+                    </span>
+                    <span className="mt-0.5 block text-[9px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                      {index === 0 ? "Reference" : `${peakSpeed} km/h peak`}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="rounded-[18px] border border-dashed border-[var(--line)] bg-[var(--surface)] p-4 text-sm leading-6 text-[var(--muted)]">
+            No session-matched comparison traces are available.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2.5">
+        <div className="rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-3">
+          <div className="eyebrow">Lap delta</div>
+          <div className="telemetry-text mt-2 text-xl font-semibold text-[var(--foreground)]">
+            {lapDelta === null ? "--" : `${formatDelta(lapDelta)}s`}
+          </div>
+        </div>
+        <div className="rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-3">
+          <div className="eyebrow">Trace depth</div>
+          <div className="telemetry-text mt-2 text-xl font-semibold text-[var(--foreground)]">
+            {comparison.traces.reduce((sum, trace) => sum + trace.samples.length, 0)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-[var(--line)] pt-3 text-xs leading-5 text-[var(--muted)]">
+        {comparison.note}
+      </div>
+    </Panel>
+  );
+}
+
 function StrategyPanel({
   strategy,
   selectedDriverId,
@@ -3509,7 +3612,11 @@ function StrategyPanel({
   selectedDriverId: string;
   onSelect: (driverId: string) => void;
 }) {
+  const [showFullField, setShowFullField] = useState(false);
   const driversWithStints = strategy.drivers.filter((driver) => driver.stints.length);
+  const visibleDrivers = showFullField
+    ? driversWithStints
+    : driversWithStints.slice(0, 6);
   const totalStops = strategy.drivers.reduce(
     (sum, driver) => sum + driver.pitOutcomes.length,
     0,
@@ -3593,7 +3700,7 @@ function StrategyPanel({
             <span>Stop read</span>
           </div>
           <div className="grid gap-1.5">
-            {driversWithStints.map((driver) => {
+            {visibleDrivers.map((driver) => {
               const active = driver.driverId === selectedDriverId;
               const signal =
                 driver.pitOutcomes.find(
@@ -3676,6 +3783,22 @@ function StrategyPanel({
             })}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+          Showing {visibleDrivers.length} of {driversWithStints.length} classified drivers
+        </div>
+        {driversWithStints.length > 6 ? (
+          <button
+            type="button"
+            onClick={() => setShowFullField((current) => !current)}
+            aria-expanded={showFullField}
+            className={`glass-pill rounded-full px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--foreground)] ${FOCUS_RING}`}
+          >
+            {showFullField ? "Show top 6" : `Show full field (${driversWithStints.length})`}
+          </button>
+        ) : null}
       </div>
 
       <div className="mt-3 rounded-[14px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-[10px] leading-4 text-[var(--muted)]">
@@ -3982,7 +4105,7 @@ function RaceIntelPanel({
             {intel.headline}
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
-            Upgrade mentions, timing deltas, and source confidence converted into a usable weekend read.
+            Verified upgrade mentions stay separate from timing-derived pace so evidence and inference never blur.
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -3996,9 +4119,9 @@ function RaceIntelPanel({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1fr)]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(280px,0.55fr)_minmax(0,1.45fr)]">
         <div className="grid gap-3">
-          {intel.upgradeSignals.map((signal) => (
+          {intel.upgradeSignals.length ? intel.upgradeSignals.map((signal) => (
             <div
               key={signal.id}
               className="minimal-card team-tint relative overflow-hidden rounded-[20px] p-4 sm:rounded-[22px]"
@@ -4032,7 +4155,20 @@ function RaceIntelPanel({
                 </div>
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+              <span className="grid h-10 w-10 place-items-center rounded-[14px] bg-black/5 text-[var(--muted)]">
+                <Wrench size={17} />
+              </span>
+              <div className="eyebrow mt-5">Upgrade evidence</div>
+              <div className="section-title mt-2 text-base font-semibold">
+                No sourced package signal
+              </div>
+              <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                This area activates only when an external editorial item names a team and an upgrade or package. Timing data alone does not create an upgrade claim.
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
@@ -4882,42 +5018,49 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               onSelect={selectDriver}
             />
           </WidgetBoundary>
-          <WidgetBoundary label="Telemetry">
-            <TelemetryExperiencePanel
-              accent={telemetryAccent}
-              debugMode={debugMode}
-              driverLabel={data.telemetryDriverLabel}
-              insights={data.telemetryInsights}
-              isPlaying={isTelemetryPlaying}
-              onTogglePlayback={togglePlayback}
-              sourceMeta={data.sources.telemetry}
-              samples={data.telemetrySamples}
-              session={data.telemetrySession}
-              scrubIndex={effectiveScrubIndex}
-              workerMetrics={telemetryWorkerMetrics}
-              onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
-            />
-          </WidgetBoundary>
-          <WidgetBoundary label="F1 telemetry suite">
-            <F1TelemetrySuite
-              circuitName={data.trackMap.circuitName}
-              comparison={telemetryComparison}
-              debugMode={debugMode}
-              scrubIndex={effectiveScrubIndex}
-              onScrub={scrubTo}
-            />
-          </WidgetBoundary>
-          {debugMode ? (
-            <WidgetBoundary label="Advanced telemetry">
-              <AdvancedTelemetryPanel
-                activeSample={activeTelemetrySample}
-                drivers={data.standings}
-                selectedDriver={selectedDriver}
+          <div className="grid items-start gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.42fr)_minmax(320px,0.58fr)]">
+            <WidgetBoundary label="Telemetry">
+              <TelemetryExperiencePanel
+                accent={telemetryAccent}
+                debugMode={debugMode}
+                driverLabel={data.telemetryDriverLabel}
+                insights={data.telemetryInsights}
+                isPlaying={isTelemetryPlaying}
+                onTogglePlayback={togglePlayback}
+                sourceMeta={data.sources.telemetry}
                 samples={data.telemetrySamples}
+                session={data.telemetrySession}
+                scrubIndex={effectiveScrubIndex}
                 workerMetrics={telemetryWorkerMetrics}
-                onSelectDriver={selectDriver}
+                onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
               />
             </WidgetBoundary>
+            <WidgetBoundary label="Telemetry comparison">
+              <TelemetryComparisonPanel comparison={telemetryComparison} />
+            </WidgetBoundary>
+          </div>
+          {debugMode ? (
+            <>
+              <WidgetBoundary label="F1 telemetry suite">
+                <F1TelemetrySuite
+                  circuitName={data.trackMap.circuitName}
+                  comparison={telemetryComparison}
+                  debugMode={debugMode}
+                  scrubIndex={effectiveScrubIndex}
+                  onScrub={scrubTo}
+                />
+              </WidgetBoundary>
+              <WidgetBoundary label="Advanced telemetry">
+                <AdvancedTelemetryPanel
+                  activeSample={activeTelemetrySample}
+                  drivers={data.standings}
+                  selectedDriver={selectedDriver}
+                  samples={data.telemetrySamples}
+                  workerMetrics={telemetryWorkerMetrics}
+                  onSelectDriver={selectDriver}
+                />
+              </WidgetBoundary>
+            </>
           ) : null}
           <RaceIntelPanel intel={data.raceIntelligence} />
           <PerformanceProfilePanel driver={selectedDriver} />

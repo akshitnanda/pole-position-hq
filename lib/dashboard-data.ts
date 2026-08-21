@@ -1613,47 +1613,6 @@ async function fetchOpenDriversForContext(sessionKey: number | null) {
   return [];
 }
 
-function buildFallbackActivity(
-  drivers: DriverInsight[],
-  raceLabel: string,
-): ActivityItem[] {
-  const leadDriver = drivers[0];
-  const valueDriver = drivers
-    .slice()
-    .sort((a, b) => b.sentiment.delta - a.sentiment.delta)[0];
-
-  return [
-    {
-      id: "fallback-news-upgrades",
-      source: "fallback",
-      sourceLabel: "Product model",
-      title: `${raceLabel} upgrade watch opens across the front of the field`,
-      url: "https://www.motorsport.com/rss/",
-      publishedAt: null,
-      summary:
-        "Editorial sources are temporarily unavailable, so the dashboard is holding a model-generated upgrade watch until the next successful news pull.",
-      category: "upgrade",
-      signalScore: 58,
-      engagementLabel: "model",
-      tags: ["upgrade", leadDriver?.abbreviation ?? "F1"].filter(Boolean),
-    },
-    {
-      id: "fallback-news-timing",
-      source: "fallback",
-      sourceLabel: "Product model",
-      title: `${leadDriver?.fullName ?? "The championship leader"} sets the timing benchmark`,
-      url: "https://api.openf1.org/v1",
-      publishedAt: null,
-      summary:
-        "Timing context is derived from OpenF1 lap averages and standings while live editorial/social feeds recover.",
-      category: "timing",
-      signalScore: 52,
-      engagementLabel: "model",
-      tags: ["timing", valueDriver?.abbreviation ?? "pace"].filter(Boolean),
-    },
-  ];
-}
-
 function buildConstructorContext(drivers: DriverInsight[]) {
   const teams = new Map<
     string,
@@ -1700,16 +1659,16 @@ async function fetchActivitySurface(drivers: DriverInsight[], raceLabel: string)
   }
 
   return {
-    items: buildFallbackActivity(drivers, raceLabel),
+    items: [],
     sourcePulse: [
       ...sourcePulse,
       {
         source: "fallback" as const,
-        label: "Product model",
-        status: "fallback" as const,
-        count: 2,
+        label: "Source boundary",
+        status: "empty" as const,
+        count: 0,
         updatedAt: new Date().toISOString(),
-        note: "Fallback activity keeps the newsroom usable when external feeds fail.",
+        note: "No modeled headlines are substituted when external sources are unavailable.",
       },
     ],
   };
@@ -1720,9 +1679,11 @@ function buildUpgradeSignals(
   drivers: DriverInsight[],
 ): UpgradeSignal[] {
   const teams = buildConstructorContext(drivers);
-  const upgradeItems = activityItems.filter((item) => item.category === "upgrade");
+  const upgradeItems = activityItems.filter(
+    (item) => item.category === "upgrade" && item.source !== "fallback",
+  );
 
-  const signals = teams.slice(0, 6).flatMap<UpgradeSignal>((team, index) => {
+  const signals = teams.slice(0, 6).flatMap<UpgradeSignal>((team) => {
     const related = upgradeItems.filter((item) => {
       const text = `${item.title} ${item.summary}`.toLowerCase();
       return (
@@ -1731,28 +1692,29 @@ function buildUpgradeSignals(
       );
     });
 
-    if (!related.length && index > 2) {
+    if (!related.length) {
       return [];
     }
 
-    const confidence = related.length
-      ? Math.min(94, 58 + related.reduce((sum, item) => sum + item.signalScore, 0) / related.length / 2)
-      : Math.max(42, 68 - index * 6);
+    const confidence = Math.min(
+      94,
+      58 +
+        related.reduce((sum, item) => sum + item.signalScore, 0) /
+          related.length /
+          2,
+    );
+    const namedPackage = related[0].title.match(
+      /\b(floor|wing|sidepod|aero|package|upgrade)\b/i,
+    )?.[0];
 
     return {
       id: `upgrade-${team.teamName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
       teamName: team.teamName,
       teamColor: team.teamColor,
-      package: related[0]?.title.match(/\b(floor|wing|sidepod|aero|package|upgrade)\b/i)?.[0]
-        ? `${related[0].title.match(/\b(floor|wing|sidepod|aero|package|upgrade)\b/i)?.[0]} focus`
-        : index === 0
-          ? "Front-end balance watch"
-          : index === 1
-            ? "Low-drag trim watch"
-            : "Race package watch",
+      package: namedPackage ? `${namedPackage} mention` : "Upgrade mention",
       impact: confidence >= 76 ? "high" : confidence >= 58 ? "medium" : "low",
       confidence: Math.round(confidence),
-      evidence: related[0]?.summary || related[0]?.title || "Derived from standings pressure and recent pace context.",
+      evidence: related[0].summary || related[0].title,
       relatedItemIds: related.slice(0, 3).map((item) => item.id),
     };
   });
@@ -2161,22 +2123,22 @@ export async function getDashboardData(): Promise<DashboardData> {
       activity: {
         label: "Activity",
         source: "Motorsport.com, The Race, Reddit, X",
-        status: activity.items.some((item) => item.source !== "fallback")
-          ? "cached"
-          : "simulated",
+        status: activity.items.length ? "cached" : "empty",
         updatedAt: activity.items.length ? generatedAt : null,
-        note: activity.items.some((item) => item.source !== "fallback")
+        note: activity.items.length
           ? "Editorial and social feeds are normalized into a single activity rail."
-          : "External activity feeds were unavailable, so modeled race notes are displayed.",
+          : "External activity feeds were unavailable; no modeled headlines were substituted.",
       },
       raceIntel: {
         label: "Race intel",
-        source: "Activity feeds + OpenF1 timing model",
+        source: "Verified activity mentions + OpenF1 lap data",
         status: raceIntelligence.timingDeltas.length || raceIntelligence.upgradeSignals.length
           ? "cached"
           : "empty",
         updatedAt: generatedAt,
-        note: "Upgrade and timing cards are generated from source mentions, standings pressure, and lap data.",
+        note: raceIntelligence.upgradeSignals.length
+          ? "Upgrade cards require a matching external source mention; timing deltas come from session lap data."
+          : "No sourced upgrade mention is available; timing deltas remain grounded in session lap data.",
       },
     },
     activity,
