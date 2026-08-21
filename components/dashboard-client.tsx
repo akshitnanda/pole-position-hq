@@ -4255,6 +4255,14 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     totalLaps: 0,
     drivers: [],
   };
+  const telemetryComparison: DashboardData["telemetryComparison"] =
+    data.telemetryComparison ?? {
+      session: data.telemetrySession,
+      status: "empty",
+      updatedAt: null,
+      note: "Refresh to load two session-matched telemetry traces.",
+      traces: [],
+    };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
   const error = query.error;
@@ -4464,6 +4472,12 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       null,
     [data.standings, effectiveSelectedDriverId],
   );
+  const telemetryDriver = useMemo(
+    () =>
+      data.standings.find((driver) => driver.id === data.telemetryDriverId) ??
+      null,
+    [data.standings, data.telemetryDriverId],
+  );
   const activeTelemetrySample =
     data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
 
@@ -4494,6 +4508,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     visualThemeOptions.find((theme) => theme.id === ui.visualTheme) ??
     visualThemeOptions[0];
   const accent = activeVisualTheme?.accent ?? "E10600";
+  const telemetryAccent = telemetryDriver?.teamColor ?? accent;
   const themeStyle = useMemo(() => buildThemeStyle(accent), [accent]);
 
   const changeVisualTheme = (themeId: string) => {
@@ -4788,7 +4803,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           </WidgetBoundary>
           <WidgetBoundary label="Telemetry">
             <TelemetryExperiencePanel
-              accent={accent}
+              accent={telemetryAccent}
               driverLabel={data.telemetryDriverLabel}
               insights={data.telemetryInsights}
               isPlaying={isTelemetryPlaying}
@@ -4804,13 +4819,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <WidgetBoundary label="F1 telemetry suite">
             <F1TelemetrySuite
               circuitName={data.trackMap.circuitName}
-              drivers={data.standings}
-              samples={data.telemetrySamples}
+              comparison={telemetryComparison}
               scrubIndex={effectiveScrubIndex}
-              selectedDriver={selectedDriver}
-              selectedDriverId={effectiveSelectedDriverId}
               onScrub={scrubTo}
-              onSelectDriver={selectDriver}
             />
           </WidgetBoundary>
           <WidgetBoundary label="Advanced telemetry">

@@ -73,6 +73,16 @@ export type TelemetryInsights = {
   attackBalance: number;
 };
 
+export type TelemetryTrace = {
+  driverId: string;
+  driverLabel: string;
+  abbreviation: string;
+  teamColor: string;
+  lapNumber: number;
+  lapTime: number;
+  samples: TelemetrySample[];
+};
+
 export type TrackCar = {
   driverId: string;
   abbreviation: string;
@@ -265,6 +275,13 @@ export type DashboardData = {
   telemetryDriverLabel: string | null;
   telemetrySamples: TelemetrySample[];
   telemetryInsights: TelemetryInsights | null;
+  telemetryComparison: {
+    session: SessionSummary | null;
+    status: DataFeedStatus;
+    updatedAt: string | null;
+    note: string;
+    traces: TelemetryTrace[];
+  };
   standings: DriverInsight[];
   timingTower: {
     session: SessionSummary | null;
