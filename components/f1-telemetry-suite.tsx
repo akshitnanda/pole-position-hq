@@ -90,6 +90,7 @@ type TrackPoint = {
 export type F1TelemetrySuiteProps = {
   circuitName: string;
   comparison: DashboardData["telemetryComparison"];
+  debugMode: boolean;
   scrubIndex: number;
   onScrub: (index: number) => void;
 };
@@ -367,6 +368,7 @@ function MapboxTelemetryLayer({
 export function F1TelemetrySuite({
   circuitName,
   comparison,
+  debugMode,
   scrubIndex,
   onScrub,
 }: F1TelemetrySuiteProps) {
@@ -848,7 +850,7 @@ export function F1TelemetrySuite({
           ) : null}
         </div>
 
-        <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
+        {debugMode ? <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Reactive systems</div>
@@ -898,9 +900,9 @@ export function F1TelemetrySuite({
               );
             })}
           </div>
-        </div>
+        </div> : null}
 
-        <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
+        {debugMode ? <div className="rounded-[24px] border border-white/10 bg-black/30 p-4 backdrop-blur-[12px] transition hover:border-[var(--suite-accent)]">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Voice control</div>
@@ -926,7 +928,7 @@ export function F1TelemetrySuite({
               {replay.isReplaying ? <Pause size={12} /> : <Play size={12} />}
             </button>
           </div>
-        </div>
+        </div> : null}
       </aside>
     </section>
   );
