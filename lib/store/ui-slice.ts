@@ -13,7 +13,7 @@ type DashboardUiState = {
 };
 
 const initialState: DashboardUiState = {
-  activeTab: "overview",
+  activeTab: "live",
   selectedDriverId: "",
   watchlist: [],
   scrubIndex: 0,

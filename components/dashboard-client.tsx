@@ -10,7 +10,6 @@ import {
   Clock3,
   Flag,
   Gauge,
-  ListOrdered,
   Map as MapIcon,
   MessageCircle,
   Newspaper,
@@ -20,7 +19,6 @@ import {
   Radio,
   RefreshCw,
   SunMoon,
-  Sparkles,
   TrendingUp,
   Trophy,
   Users,
@@ -63,15 +61,7 @@ import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
-type DashboardTab =
-  | "overview"
-  | "newsroom"
-  | "race-intel"
-  | "timing"
-  | "telemetry"
-  | "stats"
-  | "weekend"
-  | "fantasy";
+type DashboardTab = "live" | "analysis" | "weekend" | "season";
 
 type VisualThemeOption = {
   id: string;
@@ -87,54 +77,44 @@ const DASHBOARD_TABS: Array<{
   icon: LucideIcon;
 }> = [
   {
-    id: "overview",
-    label: "Overview",
-    description: "Race control",
-    icon: Sparkles,
-  },
-  {
-    id: "newsroom",
-    label: "Newsroom",
-    description: "Feeds",
-    icon: Newspaper,
-  },
-  {
-    id: "race-intel",
-    label: "Race Intel",
-    description: "Upgrades",
-    icon: Wrench,
-  },
-  {
-    id: "timing",
-    label: "Timing",
-    description: "Field order",
-    icon: ListOrdered,
-  },
-  {
-    id: "telemetry",
-    label: "Telemetry",
-    description: "Trace lab",
+    id: "live",
+    label: "Live",
+    description: "Timing and race control",
     icon: Radio,
   },
   {
-    id: "stats",
-    label: "Stats",
-    description: "Standings",
-    icon: Activity,
+    id: "analysis",
+    label: "Analysis",
+    description: "Telemetry and intelligence",
+    icon: Wrench,
   },
   {
     id: "weekend",
     label: "Weekend",
-    description: "Info",
+    description: "Schedule and newsroom",
     icon: CalendarDays,
   },
   {
-    id: "fantasy",
-    label: "Fantasy",
-    description: "Market",
-    icon: TrendingUp,
+    id: "season",
+    label: "Season",
+    description: "Standings and fantasy",
+    icon: Trophy,
   },
 ];
+
+const LEGACY_TAB_MAP: Record<string, DashboardTab> = {
+  live: "live",
+  overview: "live",
+  timing: "live",
+  analysis: "analysis",
+  telemetry: "analysis",
+  "race-intel": "analysis",
+  weekend: "weekend",
+  newsroom: "weekend",
+  season: "season",
+  stats: "season",
+  fantasy: "season",
+};
 
 function rgba(hex: string, alpha: number) {
   const normalized = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
@@ -718,8 +698,8 @@ function getFeedTone(status: DashboardData["sources"]["schedule"]["status"]) {
   return { label: "Empty", className: "text-[var(--muted)] bg-black/5 border-black/10" };
 }
 
-function isDashboardTab(value: unknown): value is DashboardTab {
-  return DASHBOARD_TABS.some((tab) => tab.id === value);
+function normalizeDashboardTab(value: unknown): DashboardTab | null {
+  return typeof value === "string" ? LEGACY_TAB_MAP[value] ?? null : null;
 }
 
 function formatLapTime(value: number | null) {
@@ -1159,7 +1139,7 @@ function BriefingPanel({
           eyebrow="News pulse"
           title={topActivity?.title ?? "Activity feeds are standing by"}
           meta={topActivity ? `${topActivity.sourceLabel} / ${topActivity.signalScore} signal` : "No readable feed item yet"}
-          onClick={() => onNavigate("newsroom")}
+          onClick={() => onNavigate("weekend")}
         />
         <BriefingAction
           icon={<Wrench size={16} />}
@@ -1167,7 +1147,7 @@ function BriefingPanel({
           title={topUpgrade ? `${topUpgrade.teamName}: ${topUpgrade.package}` : "Upgrade model warming up"}
           meta={topUpgrade ? `${topUpgrade.impact} impact / ${topUpgrade.confidence}% confidence` : dashboard.raceIntelligence.raceLabel}
           accent={topUpgrade?.teamColor}
-          onClick={() => onNavigate("race-intel")}
+          onClick={() => onNavigate("analysis")}
         />
         <BriefingAction
           icon={<Gauge size={16} />}
@@ -1181,7 +1161,7 @@ function BriefingPanel({
           }
           meta={topDelta ? topDelta.note : "Select a driver for a deeper read"}
           accent={topDelta?.teamColor ?? selectedDriver?.teamColor}
-          onClick={() => onNavigate("timing")}
+          onClick={() => onNavigate("live")}
         />
       </div>
     </Panel>
@@ -3070,10 +3050,11 @@ function FantasyActionPanel({
 
 function RaceControlPanel({
   raceControl,
+  initialNow,
 }: {
   raceControl: DashboardData["raceControl"];
+  initialNow: number;
 }) {
-  const [initialNow] = useState(() => Date.now());
   const countdown = useCountdown(raceControl.countdownEndsAt, initialNow);
   const flagTone: Record<DashboardData["raceControl"]["flag"], string> = {
     Idle: "bg-[#697386]",
@@ -3144,7 +3125,7 @@ function DashboardTabs({
   return (
     <div className="dashboard-tabs sticky top-2 z-30 border border-[var(--line)] bg-[var(--panel-strong)] p-1.5 shadow-[0_14px_34px_rgba(17,21,29,0.08)] backdrop-blur-xl">
       <div
-        className="flex gap-0.5 overflow-x-auto hide-scrollbar lg:grid lg:grid-cols-8"
+        className="grid grid-cols-4 gap-0.5"
         role="tablist"
         aria-label="Dashboard sections"
       >
@@ -3158,14 +3139,16 @@ function DashboardTabs({
               type="button"
               role="tab"
               aria-selected={active}
+              aria-keyshortcuts={String(index + 1)}
               onClick={() => onChange(tab.id)}
-              className={`group flex min-w-[112px] items-center justify-center gap-2 px-3 py-2.5 text-left transition lg:min-w-0 ${FOCUS_RING} ${
+              title={`${tab.label}: ${tab.description} (shortcut ${index + 1})`}
+              className={`group flex min-w-0 items-center justify-center gap-1.5 px-2 py-2.5 text-left transition sm:gap-2 sm:px-3 ${FOCUS_RING} ${
                 active
                   ? "bg-[var(--team-accent)] text-[var(--theme-on-accent)]"
                   : "text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--foreground)]"
               }`}
             >
-              <span className={`telemetry-text text-[9px] ${active ? "opacity-60" : "opacity-45"}`}>{String(index + 1).padStart(2, "0")}</span>
+              <span className={`telemetry-text hidden text-[9px] sm:inline ${active ? "opacity-60" : "opacity-45"}`}>{index + 1}</span>
               <Icon size={14} aria-hidden="true" />
               <span className="truncate text-xs font-semibold">{tab.label}</span>
             </button>
@@ -3947,7 +3930,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const selectedDriverId = ui.selectedDriverId;
   const watchlist = useMemo(() => new Set(ui.watchlist), [ui.watchlist]);
   const scrubIndex = ui.scrubIndex;
-  const activeTab = isDashboardTab(ui.activeTab) ? ui.activeTab : "overview";
+  const activeTab = normalizeDashboardTab(ui.activeTab) ?? "live";
   const isTelemetryPlaying = ui.isTelemetryPlaying;
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
@@ -3961,8 +3944,14 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
+      const urlTab = normalizeDashboardTab(
+        new URLSearchParams(window.location.search).get("view"),
+      );
       const rawPrefs = window.localStorage.getItem(DASHBOARD_PREFS_KEY);
       if (!rawPrefs) {
+        if (urlTab) {
+          dispatch(hydratePreferences({ activeTab: urlTab }));
+        }
         setPrefsLoaded(true);
         return;
       }
@@ -3980,7 +3969,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
         dispatch(
           hydratePreferences({
-            activeTab: isDashboardTab(parsed.activeTab) ? parsed.activeTab : undefined,
+            activeTab: urlTab ?? normalizeDashboardTab(parsed.activeTab) ?? "live",
             selectedDriverId:
               parsed.selectedDriverId &&
               data.standings.some((driver) => driver.id === parsed.selectedDriverId)
@@ -4000,6 +3989,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         );
       } catch {
         window.localStorage.removeItem(DASHBOARD_PREFS_KEY);
+        if (urlTab) {
+          dispatch(hydratePreferences({ activeTab: urlTab }));
+        }
       } finally {
         setPrefsLoaded(true);
       }
@@ -4007,6 +3999,36 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
     return () => window.cancelAnimationFrame(frame);
   }, [data.standings, dispatch]);
+
+  useEffect(() => {
+    const syncTabFromHistory = () => {
+      const tab =
+        normalizeDashboardTab(
+          new URLSearchParams(window.location.search).get("view"),
+        ) ?? "live";
+      dispatch(setActiveTabAction(tab));
+      window.scrollTo({ top: 0, behavior: "auto" });
+    };
+
+    window.addEventListener("popstate", syncTabFromHistory);
+    return () => window.removeEventListener("popstate", syncTabFromHistory);
+  }, [dispatch]);
+
+  useEffect(() => {
+    if (!prefsLoaded) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("view") !== activeTab) {
+      url.searchParams.set("view", activeTab);
+      window.history.replaceState(
+        { ...window.history.state, view: activeTab },
+        "",
+        url,
+      );
+    }
+  }, [activeTab, prefsLoaded]);
 
   useEffect(() => {
     if (!selectedDriverId && data.standings[0]?.id) {
@@ -4128,8 +4150,15 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   };
 
   const setActiveTab = (tab: DashboardTab) => {
-    dispatch(setActiveTabAction(tab));
-    logDashboardInteraction("tab_change", tab);
+    if (tab !== activeTab) {
+      dispatch(setActiveTabAction(tab));
+      logDashboardInteraction("tab_change", tab);
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", tab);
+      window.history.pushState({ ...window.history.state, view: tab }, "", url);
+    }
+    window.scrollTo({ top: 0, behavior: "auto" });
   };
 
   const scrubTo = (index: number) => {
@@ -4223,6 +4252,16 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       if (event.code === "Space") {
         event.preventDefault();
         togglePlayback();
+      }
+
+      if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const shortcutIndex = Number.parseInt(event.key, 10) - 1;
+        const shortcutTab = DASHBOARD_TABS[shortcutIndex];
+        if (shortcutTab) {
+          event.preventDefault();
+          setActiveTab(shortcutTab.id);
+          return;
+        }
       }
 
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -4326,68 +4365,29 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
         </div>
       ) : null}
 
-      <HeaderHero
-        dashboard={data}
-        selectedDriver={selectedDriver}
-        freshness={freshness}
-        snapshotNow={snapshotNow}
-      />
-
       <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "overview" ? (
+      {activeTab === "live" ? (
         <div className="grid gap-4 sm:gap-5">
-          <WidgetBoundary label="Race control">
-            <RaceControlPanel raceControl={data.raceControl} />
-          </WidgetBoundary>
-
-          <BriefingPanel
+          <HeaderHero
             dashboard={data}
             selectedDriver={selectedDriver}
-            onNavigate={setActiveTab}
+            freshness={freshness}
+            snapshotNow={snapshotNow}
           />
 
-          <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-            <div className="grid gap-4 sm:gap-5">
-              <WidgetBoundary label="Telemetry">
-                <TelemetryExperiencePanel
-                  accent={accent}
-                  driverLabel={data.telemetryDriverLabel}
-                  insights={data.telemetryInsights}
-                  isPlaying={isTelemetryPlaying}
-                  onTogglePlayback={togglePlayback}
-                  sourceMeta={data.sources.telemetry}
-                  samples={data.telemetrySamples}
-                  session={data.telemetrySession}
-                  scrubIndex={effectiveScrubIndex}
-                  workerMetrics={telemetryWorkerMetrics}
-                  onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
-                />
-              </WidgetBoundary>
+          <WidgetBoundary label="Race control">
+            <RaceControlPanel raceControl={data.raceControl} initialNow={snapshotNow} />
+          </WidgetBoundary>
 
-              <WidgetBoundary label="Advanced telemetry">
-                <AdvancedTelemetryPanel
-                  activeSample={activeTelemetrySample}
-                  drivers={data.standings}
-                  selectedDriver={selectedDriver}
-                  samples={data.telemetrySamples}
-                  workerMetrics={telemetryWorkerMetrics}
-                  onSelectDriver={selectDriver}
-                />
-              </WidgetBoundary>
-
-              <PerformanceProfilePanel driver={selectedDriver} />
-
-              <WidgetBoundary label="Fantasy hub">
-                <FantasyActionPanel
-                  fantasy={data.fantasy}
-                  sourceMeta={data.sources.fantasy}
-                  watchlist={watchlist}
-                  onToggleWatch={toggleWatch}
-                />
-              </WidgetBoundary>
-            </div>
-
+          <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
+            <WidgetBoundary label="Live timing">
+              <TimingBoardPanel
+                drivers={data.standings}
+                selectedDriverId={effectiveSelectedDriverId}
+                onSelect={selectDriver}
+              />
+            </WidgetBoundary>
             <WidgetBoundary label="Track map">
               <LiveActionDock
                 circuitName={data.trackMap.circuitName}
@@ -4405,44 +4405,18 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               />
             </WidgetBoundary>
           </div>
-        </div>
-      ) : null}
 
-      {activeTab === "newsroom" ? (
-        <NewsroomPanel activity={data.activity} />
-      ) : null}
-
-      {activeTab === "race-intel" ? (
-        <RaceIntelPanel intel={data.raceIntelligence} />
-      ) : null}
-
-      {activeTab === "timing" ? (
-        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
-          <TimingBoardPanel
-            drivers={data.standings}
-            selectedDriverId={effectiveSelectedDriverId}
-            onSelect={selectDriver}
-          />
-          <LiveActionDock
-            circuitName={data.trackMap.circuitName}
-            layoutKey={data.trackMap.layoutKey}
-            cars={data.trackMap.cars}
+          <BriefingPanel
+            dashboard={data}
             selectedDriver={selectedDriver}
-            insights={data.telemetryInsights}
-            liveTiming={data.liveTiming}
-            telemetrySamples={data.telemetrySamples}
-            scrubIndex={effectiveScrubIndex}
-            drivers={data.standings}
-            selectedDriverId={effectiveSelectedDriverId}
-            onSelect={selectDriver}
-            onScrub={scrubTo}
+            onNavigate={setActiveTab}
           />
         </div>
       ) : null}
 
-      {activeTab === "telemetry" ? (
-        <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)]">
-          <div className="grid gap-4 sm:gap-5">
+      {activeTab === "analysis" ? (
+        <div className="grid gap-4 sm:gap-5">
+          <WidgetBoundary label="Telemetry">
             <TelemetryExperiencePanel
               accent={accent}
               driverLabel={data.telemetryDriverLabel}
@@ -4456,18 +4430,20 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               workerMetrics={telemetryWorkerMetrics}
               onScrub={(index) => (index === null ? scrubToLive() : scrubTo(index))}
             />
-            <WidgetBoundary label="F1 telemetry suite">
-              <F1TelemetrySuite
-                circuitName={data.trackMap.circuitName}
-                drivers={data.standings}
-                samples={data.telemetrySamples}
-                scrubIndex={effectiveScrubIndex}
-                selectedDriver={selectedDriver}
-                selectedDriverId={effectiveSelectedDriverId}
-                onScrub={scrubTo}
-                onSelectDriver={selectDriver}
-              />
-            </WidgetBoundary>
+          </WidgetBoundary>
+          <WidgetBoundary label="F1 telemetry suite">
+            <F1TelemetrySuite
+              circuitName={data.trackMap.circuitName}
+              drivers={data.standings}
+              samples={data.telemetrySamples}
+              scrubIndex={effectiveScrubIndex}
+              selectedDriver={selectedDriver}
+              selectedDriverId={effectiveSelectedDriverId}
+              onScrub={scrubTo}
+              onSelectDriver={selectDriver}
+            />
+          </WidgetBoundary>
+          <WidgetBoundary label="Advanced telemetry">
             <AdvancedTelemetryPanel
               activeSample={activeTelemetrySample}
               drivers={data.standings}
@@ -4476,49 +4452,38 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               workerMetrics={telemetryWorkerMetrics}
               onSelectDriver={selectDriver}
             />
-            <PerformanceProfilePanel driver={selectedDriver} />
-          </div>
-          <LiveActionDock
-            circuitName={data.trackMap.circuitName}
-            layoutKey={data.trackMap.layoutKey}
-            cars={data.trackMap.cars}
-            selectedDriver={selectedDriver}
-            insights={data.telemetryInsights}
-            liveTiming={data.liveTiming}
-            telemetrySamples={data.telemetrySamples}
-            scrubIndex={effectiveScrubIndex}
-            drivers={data.standings}
-            selectedDriverId={effectiveSelectedDriverId}
-            onSelect={selectDriver}
-            onScrub={scrubTo}
-          />
-        </div>
-      ) : null}
-
-      {activeTab === "stats" ? (
-        <div className="grid gap-4 sm:gap-5">
-          <StatsPanel drivers={data.standings} />
+          </WidgetBoundary>
+          <RaceIntelPanel intel={data.raceIntelligence} />
           <PerformanceProfilePanel driver={selectedDriver} />
         </div>
       ) : null}
 
       {activeTab === "weekend" ? (
-        <WeekendInfoPanel dashboard={data} />
+        <div className="grid gap-4 sm:gap-5">
+          <WeekendInfoPanel dashboard={data} />
+          <NewsroomPanel activity={data.activity} />
+        </div>
       ) : null}
 
-      {activeTab === "fantasy" ? (
+      {activeTab === "season" ? (
         <div className="grid gap-4 sm:gap-5">
-          <WatchlistPanel
-            drivers={data.standings}
-            watchlist={watchlist}
-            onToggleWatch={toggleWatch}
-          />
-          <FantasyActionPanel
-            fantasy={data.fantasy}
-            sourceMeta={data.sources.fantasy}
-            watchlist={watchlist}
-            onToggleWatch={toggleWatch}
-          />
+          <StatsPanel drivers={data.standings} />
+          <div className="grid gap-4 sm:gap-5 lg:grid-cols-2">
+            <PerformanceProfilePanel driver={selectedDriver} />
+            <WatchlistPanel
+              drivers={data.standings}
+              watchlist={watchlist}
+              onToggleWatch={toggleWatch}
+            />
+          </div>
+          <WidgetBoundary label="Fantasy hub">
+            <FantasyActionPanel
+              fantasy={data.fantasy}
+              sourceMeta={data.sources.fantasy}
+              watchlist={watchlist}
+              onToggleWatch={toggleWatch}
+            />
+          </WidgetBoundary>
         </div>
       ) : null}
 

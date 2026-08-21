@@ -782,7 +782,7 @@ export function F1TelemetrySuite({
         >
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">Generated Montreal map</div>
+              <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">{circuitName} circuit map</div>
               <h3 className="mt-1 font-[var(--font-display)] text-[clamp(1.15rem,2vw,1.75rem)] font-semibold">
                 Sector heat + live trail
               </h3>
