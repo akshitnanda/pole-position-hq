@@ -3271,7 +3271,7 @@ function TimingBoardPanel({
   }
 
   return (
-    <Panel>
+    <Panel className="min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
           <div className="flex flex-wrap items-center gap-2">
@@ -3408,6 +3408,203 @@ function TimingBoardPanel({
             })}
           </div>
         </div>
+      </div>
+    </Panel>
+  );
+}
+
+function getStrategySignalTone(
+  signal: DashboardData["strategy"]["drivers"][number]["pitOutcomes"][number]["signal"],
+) {
+  if (signal === "undercut" || signal === "overcut" || signal === "gained") {
+    return "border-[#00a76f]/25 bg-[#00a76f]/10 text-[#00845a]";
+  }
+  if (signal === "lost") {
+    return "border-[#e10600]/20 bg-[#e10600]/8 text-[#c51b17]";
+  }
+  return "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]";
+}
+
+function StrategyPanel({
+  strategy,
+  selectedDriverId,
+  onSelect,
+}: {
+  strategy: DashboardData["strategy"];
+  selectedDriverId: string;
+  onSelect: (driverId: string) => void;
+}) {
+  const driversWithStints = strategy.drivers.filter((driver) => driver.stints.length);
+  const totalStops = strategy.drivers.reduce(
+    (sum, driver) => sum + driver.pitOutcomes.length,
+    0,
+  );
+  const sourceTone = getFeedTone(strategy.status);
+  const totalLaps = Math.max(strategy.totalLaps, 1);
+
+  if (!driversWithStints.length) {
+    return (
+      <Panel>
+        <div className="eyebrow">Strategy</div>
+        <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+          Stint replay unavailable
+        </div>
+        <div className="mt-4 rounded-[16px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-4 py-5 text-sm text-[var(--muted)]">
+          {strategy.note}
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Strategy</div>
+            <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}>
+              {sourceTone.label}
+            </span>
+            <span className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+              Session replay
+            </span>
+          </div>
+          <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
+            {strategy.session
+              ? `${strategy.session.circuitName} stint map`
+              : "Tyre and pit sequence"}
+          </div>
+          <div className="section-copy mt-1 text-[13px] sm:text-sm">
+            See when the race changed: compound sequence, stop timing, and the first observable position response.
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <StatChip label="Race laps" value={`${strategy.totalLaps || "--"}`} />
+          <StatChip label="Strategies" value={`${driversWithStints.length}`} />
+          <StatChip label="Stops" value={`${totalStops}`} />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-[var(--line)] py-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+        {[
+          ["SOFT", "Soft"],
+          ["MEDIUM", "Medium"],
+          ["HARD", "Hard"],
+          ["INTERMEDIATE", "Intermediate"],
+          ["WET", "Wet"],
+        ].map(([compound, label]) => {
+          const tone = getCompoundTone(compound);
+          return (
+            <span key={compound} className="inline-flex items-center gap-1.5">
+              <span
+                className="grid h-5 w-5 place-items-center rounded-full text-[9px] font-bold"
+                style={{ color: tone.color, background: tone.background }}
+              >
+                {tone.label}
+              </span>
+              {label}
+            </span>
+          );
+        })}
+        <span className="ml-auto">Pit markers sit on the lap timeline</span>
+      </div>
+
+      <div className="mt-4 min-w-0 max-w-full overflow-x-auto hide-scrollbar">
+        <div className="min-w-[900px]">
+          <div className="grid grid-cols-[58px_150px_minmax(500px,1fr)_138px] items-center gap-3 px-3 pb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+            <span>Finish</span>
+            <span>Driver</span>
+            <span className="flex justify-between"><span>Lap 1</span><span>Lap {strategy.totalLaps}</span></span>
+            <span>Stop read</span>
+          </div>
+          <div className="grid gap-1.5">
+            {driversWithStints.map((driver) => {
+              const active = driver.driverId === selectedDriverId;
+              const signal =
+                driver.pitOutcomes.find(
+                  (outcome) => outcome.signal === "undercut" || outcome.signal === "overcut",
+                ) ??
+                driver.pitOutcomes.find(
+                  (outcome) => outcome.positionDelta !== null && outcome.positionDelta !== 0,
+                ) ??
+                driver.pitOutcomes.at(-1) ??
+                null;
+              const signalLabel = signal
+                ? `${signal.signal === "unavailable" ? "No read" : signal.signal}${
+                    signal.positionDelta
+                      ? ` ${signal.positionDelta > 0 ? "+" : ""}${signal.positionDelta}`
+                      : ""
+                  }`
+                : "No stop";
+
+              return (
+                <button
+                  key={driver.driverId}
+                  type="button"
+                  onClick={() => onSelect(driver.driverId)}
+                  aria-pressed={active}
+                  className={`grid grid-cols-[58px_150px_minmax(500px,1fr)_138px] items-center gap-3 rounded-[12px] border px-3 py-2.5 text-left transition hover:-translate-y-px ${FOCUS_RING}`}
+                  style={{
+                    borderColor: active ? rgba(driver.teamColor, 0.42) : "var(--line)",
+                    background: active
+                      ? `linear-gradient(90deg, ${rgba(driver.teamColor, 0.14)}, var(--surface-strong))`
+                      : "var(--surface)",
+                  }}
+                >
+                  <span className="telemetry-text text-sm font-semibold text-[var(--foreground)]">
+                    P{driver.finalPosition}
+                  </span>
+                  <span className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: `#${driver.teamColor}` }}>
+                    <span className="block text-sm font-semibold text-[var(--foreground)]">{driver.abbreviation}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-[var(--muted)]">{driver.fullName}</span>
+                  </span>
+                  <span className="relative block h-8 overflow-hidden rounded-[9px] border border-[var(--line)] bg-[var(--surface-strong)]">
+                    {driver.stints.map((stint) => {
+                      const tone = getCompoundTone(stint.compound);
+                      const lapEnd = stint.lapEnd ?? strategy.totalLaps;
+                      const left = ((stint.lapStart - 1) / totalLaps) * 100;
+                      const width = (Math.max(1, lapEnd - stint.lapStart + 1) / totalLaps) * 100;
+                      return (
+                        <span
+                          key={`${driver.driverId}-${stint.stintNumber}`}
+                          className="absolute inset-y-1 flex items-center overflow-hidden rounded-[6px] border px-1.5 text-[9px] font-semibold"
+                          style={{
+                            left: `${left}%`,
+                            width: `${width}%`,
+                            color: tone.color,
+                            background: tone.background,
+                            borderColor: rgba(driver.teamColor, 0.16),
+                          }}
+                          title={`${stint.compound ?? "Unknown compound"}, laps ${stint.lapStart}-${lapEnd}`}
+                        >
+                          {tone.label} {stint.lapStart}-{lapEnd}
+                        </span>
+                      );
+                    })}
+                    {driver.pitOutcomes.map((outcome, index) => (
+                      <span
+                        key={`${driver.driverId}-pit-${outcome.lapNumber}-${index}`}
+                        className="absolute inset-y-0 z-10 w-px bg-[var(--foreground)]/55"
+                        style={{ left: `${(outcome.lapNumber / totalLaps) * 100}%` }}
+                        title={`Pit lap ${outcome.lapNumber}: ${outcome.signal}`}
+                      />
+                    ))}
+                  </span>
+                  <span
+                    className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] ${getStrategySignalTone(signal?.signal ?? "unavailable")}`}
+                    title={signal ? `Position before: ${signal.positionBefore ?? "--"}; after: ${signal.positionAfter ?? "--"}` : "No pit event recorded"}
+                  >
+                    {signalLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-[14px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-[10px] leading-4 text-[var(--muted)]">
+        Method: position immediately before a stop is compared with the first recorded position within four minutes after it. Undercut or overcut labels also compare that stop lap with the median lap for the field&apos;s equivalent stop. This is a directional replay signal, not proof that pit timing alone caused the gain.
       </div>
     </Panel>
   );
@@ -4050,6 +4247,14 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     note: "Refresh to load the session-scoped timing model introduced in this version.",
     entries: [],
   };
+  const strategy: DashboardData["strategy"] = data.strategy ?? {
+    session: data.telemetrySession,
+    status: "empty",
+    updatedAt: null,
+    note: "Refresh to load the session-scoped strategy replay introduced in this version.",
+    totalLaps: 0,
+    drivers: [],
+  };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
   const error = query.error;
@@ -4574,6 +4779,13 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "analysis" ? (
         <div className="grid gap-4 sm:gap-5">
+          <WidgetBoundary label="Strategy replay">
+            <StrategyPanel
+              strategy={strategy}
+              selectedDriverId={effectiveSelectedDriverId}
+              onSelect={selectDriver}
+            />
+          </WidgetBoundary>
           <WidgetBoundary label="Telemetry">
             <TelemetryExperiencePanel
               accent={accent}

@@ -5,6 +5,7 @@ import {
   DriverInsight,
   FantasyEntry,
   SourcePulse,
+  StrategyDriver,
   SessionSummary,
   TelemetryInsights,
   TelemetrySample,
@@ -1287,6 +1288,122 @@ function buildTimingTower(
     });
 }
 
+function buildStrategyDrivers(
+  sessionResults: OpenF1SessionResult[],
+  positions: OpenF1Position[],
+  stints: OpenF1Stint[],
+  pits: OpenF1Pit[],
+  insights: DriverInsight[],
+  timingEntries: TimingTowerEntry[],
+): StrategyDriver[] {
+  const driversByNumber = new Map(
+    insights.map((driver) => [Number(driver.sessionDriverNumber), driver]),
+  );
+  const timingByDriverId = new Map(
+    timingEntries.map((entry) => [entry.driverId, entry]),
+  );
+  const positionsByDriver = new Map<number, OpenF1Position[]>();
+  const stintsByDriver = new Map<number, OpenF1Stint[]>();
+  const pitsByDriver = new Map<number, OpenF1Pit[]>();
+
+  positions.forEach((position) => {
+    const driverPositions = positionsByDriver.get(position.driver_number) ?? [];
+    driverPositions.push(position);
+    positionsByDriver.set(position.driver_number, driverPositions);
+  });
+  stints.forEach((stint) => {
+    const driverStints = stintsByDriver.get(stint.driver_number) ?? [];
+    driverStints.push(stint);
+    stintsByDriver.set(stint.driver_number, driverStints);
+  });
+  pits.forEach((pit) => {
+    const driverPits = pitsByDriver.get(pit.driver_number) ?? [];
+    driverPits.push(pit);
+    pitsByDriver.set(pit.driver_number, driverPits);
+  });
+
+  positionsByDriver.forEach((driverPositions) =>
+    driverPositions.sort((a, b) => a.date.localeCompare(b.date)),
+  );
+  stintsByDriver.forEach((driverStints) =>
+    driverStints.sort((a, b) => a.stint_number - b.stint_number),
+  );
+  pitsByDriver.forEach((driverPits) =>
+    driverPits.sort((a, b) => a.lap_number - b.lap_number),
+  );
+
+  const pitLapsByStop = new Map<number, number[]>();
+  pitsByDriver.forEach((driverPits) => {
+    driverPits.forEach((pit, index) => {
+      const laps = pitLapsByStop.get(index) ?? [];
+      laps.push(pit.lap_number);
+      pitLapsByStop.set(index, laps);
+    });
+  });
+
+  return sessionResults.map((result, index) => {
+    const driver = driversByNumber.get(result.driver_number);
+    const driverId = driver?.id ?? `driver-${result.driver_number}`;
+    const timing = timingByDriverId.get(driverId);
+    const driverPositions = positionsByDriver.get(result.driver_number) ?? [];
+    const driverPits = pitsByDriver.get(result.driver_number) ?? [];
+    const pitOutcomes: StrategyDriver["pitOutcomes"] = driverPits.map((pit, pitIndex) => {
+      const pitTime = new Date(pit.date).getTime();
+      const positionBefore = driverPositions
+        .filter((position) => new Date(position.date).getTime() <= pitTime)
+        .at(-1) ?? null;
+      const positionAfter =
+        driverPositions.find((position) => {
+          const positionTime = new Date(position.date).getTime();
+          return positionTime > pitTime && positionTime - pitTime <= 4 * 60_000;
+        }) ?? positionBefore;
+      const positionDelta =
+        positionBefore && positionAfter
+          ? positionBefore.position - positionAfter.position
+          : null;
+      const fieldMedianLap = median(pitLapsByStop.get(pitIndex) ?? []);
+      const signal: StrategyDriver["pitOutcomes"][number]["signal"] =
+        positionDelta === null
+          ? "unavailable"
+          : positionDelta > 0
+            ? fieldMedianLap !== null && pit.lap_number < fieldMedianLap - 1
+              ? "undercut"
+              : fieldMedianLap !== null && pit.lap_number > fieldMedianLap + 1
+                ? "overcut"
+                : "gained"
+            : positionDelta < 0
+              ? "lost"
+              : "neutral";
+
+      return {
+        lapNumber: pit.lap_number,
+        positionBefore: positionBefore?.position ?? null,
+        positionAfter: positionAfter?.position ?? null,
+        positionDelta,
+        signal,
+      };
+    });
+
+    return {
+      driverId,
+      fullName: timing?.fullName ?? driver?.fullName ?? `Driver ${result.driver_number}`,
+      abbreviation:
+        timing?.abbreviation ?? driver?.abbreviation ?? String(result.driver_number),
+      teamColor: timing?.teamColor ?? driver?.teamColor ?? "697386",
+      finalPosition: timing?.position ?? result.position ?? index + 1,
+      raceStatus: timing?.raceStatus ?? "classified",
+      stints: (stintsByDriver.get(result.driver_number) ?? []).map((stint) => ({
+        stintNumber: stint.stint_number,
+        compound: stint.compound,
+        lapStart: stint.lap_start,
+        lapEnd: stint.lap_end,
+        tyreAgeAtStart: stint.tyre_age_at_start,
+      })),
+      pitOutcomes,
+    } satisfies StrategyDriver;
+  });
+}
+
 function buildTelemetrySamples(carData: OpenF1CarData[]): TelemetrySample[] {
   if (!carData.length) {
     return [];
@@ -1794,11 +1911,6 @@ export async function getDashboardData(): Promise<DashboardData> {
         new Date(recentRaceSession.date_end).getTime() - 40 * 60_000,
       ).toISOString()
     : null;
-  const positionWindowEnd = recentRaceSession
-    ? new Date(
-        new Date(recentRaceSession.date_start).getTime() + 10 * 60_000,
-      ).toISOString()
-    : null;
   const sessionResults = recentRaceSession
     ? await fetchArrayOrEmpty<OpenF1SessionResult>(
         `${OPEN_F1_BASE}/session_result?session_key=${recentRaceSession.session_key}`,
@@ -1814,9 +1926,9 @@ export async function getDashboardData(): Promise<DashboardData> {
         `${OPEN_F1_BASE}/laps?session_key=${recentRaceSession.session_key}`,
       )
     : [];
-  const startingPositions = recentRaceSession
+  const positions = recentRaceSession
     ? await fetchArrayOrEmpty<OpenF1Position>(
-        `${OPEN_F1_BASE}/position?session_key=${recentRaceSession.session_key}&date>=${encodeURIComponent(recentRaceSession.date_start)}&date<=${encodeURIComponent(positionWindowEnd ?? recentRaceSession.date_end)}`,
+        `${OPEN_F1_BASE}/position?session_key=${recentRaceSession.session_key}`,
       )
     : [];
   const stints = recentRaceSession
@@ -1883,12 +1995,24 @@ export async function getDashboardData(): Promise<DashboardData> {
   const trackCars = buildTrackCars(finalPositions, driverInsights);
   const timingEntries = buildTimingTower(
     sessionResults,
-    startingPositions,
+    positions,
     intervals,
     stints,
     pits,
     laps,
     driverInsights,
+  );
+  const strategyDrivers = buildStrategyDrivers(
+    sessionResults,
+    positions,
+    stints,
+    pits,
+    driverInsights,
+    timingEntries,
+  );
+  const strategyTotalLaps = Math.max(
+    0,
+    ...sessionResults.map((result) => result.number_of_laps ?? 0),
   );
   const mapContextSession =
     recentRaceSession && (telemetrySamples.length || trackCars.length)
@@ -1932,6 +2056,20 @@ export async function getDashboardData(): Promise<DashboardData> {
         ? `Archived ${telemetrySession?.sessionName ?? "race"} timing from OpenF1. Gaps, sectors, tyre stints, and pit events are session-scoped replay data.`
         : "No session-matched timing, stint, or pit data is available in this snapshot.",
       entries: timingEntries,
+    },
+    strategy: {
+      session: telemetrySession,
+      status: strategyDrivers.some((driver) => driver.stints.length)
+        ? "cached"
+        : "empty",
+      updatedAt: strategyDrivers.some((driver) => driver.stints.length)
+        ? generatedAt
+        : null,
+      note: strategyDrivers.some((driver) => driver.stints.length)
+        ? "Archived OpenF1 stint and pit sequence. Undercut and overcut signals are inferred from observable position change and stop timing versus the field median; they are directional, not causal proof."
+        : "No session-matched tyre stint sequence is available in this snapshot.",
+      totalLaps: strategyTotalLaps,
+      drivers: strategyDrivers,
     },
     trackMap: {
       circuitName: mapCircuitName,

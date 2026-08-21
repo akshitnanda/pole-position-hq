@@ -218,6 +218,33 @@ export type TimingTowerEntry = {
   latestLapNumber: number | null;
 };
 
+export type StrategyStint = {
+  stintNumber: number;
+  compound: string | null;
+  lapStart: number;
+  lapEnd: number | null;
+  tyreAgeAtStart: number | null;
+};
+
+export type StrategyPitOutcome = {
+  lapNumber: number;
+  positionBefore: number | null;
+  positionAfter: number | null;
+  positionDelta: number | null;
+  signal: "undercut" | "overcut" | "gained" | "lost" | "neutral" | "unavailable";
+};
+
+export type StrategyDriver = {
+  driverId: string;
+  fullName: string;
+  abbreviation: string;
+  teamColor: string;
+  finalPosition: number;
+  raceStatus: TimingTowerEntry["raceStatus"];
+  stints: StrategyStint[];
+  pitOutcomes: StrategyPitOutcome[];
+};
+
 export type DataFeedStatus = "live" | "cached" | "simulated" | "fallback" | "empty";
 
 export type DashboardFeedMeta = {
@@ -245,6 +272,14 @@ export type DashboardData = {
     updatedAt: string | null;
     note: string;
     entries: TimingTowerEntry[];
+  };
+  strategy: {
+    session: SessionSummary | null;
+    status: DataFeedStatus;
+    updatedAt: string | null;
+    note: string;
+    totalLaps: number;
+    drivers: StrategyDriver[];
   };
   trackMap: {
     circuitName: string;
