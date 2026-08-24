@@ -56,15 +56,24 @@ import {
   setScrubIndex,
   setSelectedDriverId,
   setTelemetryPlaying,
+  setTelemetryReplaySpeed,
   setVisualTheme,
   toggleWatchlist,
+  type TelemetryReplaySpeed,
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
+const TELEMETRY_REPLAY_SPEEDS = [0.5, 1, 2, 4, 8, 16] as const;
 type DashboardTab = "live" | "analysis" | "weekend" | "season";
+
+function normalizeTelemetryReplaySpeed(value: unknown): TelemetryReplaySpeed {
+  return TELEMETRY_REPLAY_SPEEDS.includes(value as TelemetryReplaySpeed)
+    ? (value as TelemetryReplaySpeed)
+    : 1;
+}
 
 type VisualThemeOption = {
   id: string;
@@ -1870,7 +1879,10 @@ function TelemetryExperiencePanel({
   driverLabel,
   insights,
   isPlaying,
+  isReplay,
   onTogglePlayback,
+  onReplaySpeedChange,
+  replaySpeed,
   sourceMeta,
   samples,
   session,
@@ -1883,7 +1895,10 @@ function TelemetryExperiencePanel({
   driverLabel: string | null;
   insights: DashboardData["telemetryInsights"];
   isPlaying: boolean;
+  isReplay: boolean;
   onTogglePlayback: () => void;
+  onReplaySpeedChange: (speed: TelemetryReplaySpeed) => void;
+  replaySpeed: TelemetryReplaySpeed;
   sourceMeta: DashboardData["sources"]["telemetry"];
   samples: DashboardData["telemetrySamples"];
   session: SessionSummary | null;
@@ -1993,15 +2008,46 @@ function TelemetryExperiencePanel({
           <button
             type="button"
             onClick={onTogglePlayback}
+            aria-keyshortcuts="Space"
             className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] ${FOCUS_RING}`}
           >
             {isPlaying ? "Pause" : "Play"}
           </button>
-          <FunBadge label="Telemetry hero" tone="dark" />
-          <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
-            <Radio size={14} />
-            /car_data
-          </div>
+          {isReplay ? (
+            <div
+              className="glass-pill inline-flex items-center gap-1 rounded-full p-1"
+              role="group"
+              aria-label="Telemetry replay speed"
+            >
+              {TELEMETRY_REPLAY_SPEEDS.map((speed) => {
+                const active = speed === replaySpeed;
+                return (
+                  <button
+                    key={speed}
+                    type="button"
+                    onClick={() => onReplaySpeedChange(speed)}
+                    aria-pressed={active}
+                    className={`rounded-full px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition ${FOCUS_RING}`}
+                    style={{
+                      color: active ? "var(--theme-on-accent)" : "var(--muted)",
+                      background: active ? "var(--team-accent)" : "transparent",
+                    }}
+                  >
+                    {speed}x
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {debugMode ? (
+            <>
+              <FunBadge label="Telemetry hero" tone="dark" />
+              <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                <Radio size={14} />
+                /car_data
+              </div>
+            </>
+          ) : null}
           <span
             className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] ${feedTone.className}`}
           >
@@ -2075,7 +2121,14 @@ function TelemetryExperiencePanel({
               {debugMode ? "drag or hover to sync the map" : "drag or hover to inspect the lap"}
             </span>
           </div>
-          <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--muted)]">
+            <span>{sourceMeta.note}</span>
+            {isReplay ? (
+              <span className="telemetry-text uppercase tracking-[0.12em]">
+                {isPlaying ? "Playing" : "Paused"} / {replaySpeed}x / Loop
+              </span>
+            ) : null}
+          </div>
           <div className={`mb-3 grid gap-2 ${debugMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <div className="glass-pill rounded-[16px] px-3 py-2.5">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -4508,11 +4561,16 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const scrubIndex = ui.scrubIndex;
   const activeTab = normalizeDashboardTab(ui.activeTab) ?? "live";
   const isTelemetryPlaying = ui.isTelemetryPlaying;
+  const telemetryReplaySpeed = normalizeTelemetryReplaySpeed(
+    ui.telemetryReplaySpeed,
+  );
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const scrubFrameRef = useRef<number | null>(null);
   const lastPlayFrameRef = useRef<number | null>(null);
+  const replayElapsedRef = useRef(0);
+  const replayIndexRef = useRef(0);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -4545,6 +4603,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           watchlist?: string[];
           scrubIndex?: number;
           isTelemetryPlaying?: boolean;
+          telemetryReplaySpeed?: number;
           themeMode?: "system" | "light" | "dark";
           visualTheme?: string;
         };
@@ -4564,6 +4623,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               typeof parsed.isTelemetryPlaying === "boolean"
                 ? parsed.isTelemetryPlaying
                 : undefined,
+            telemetryReplaySpeed: normalizeTelemetryReplaySpeed(
+              parsed.telemetryReplaySpeed,
+            ),
             themeMode: parsed.themeMode,
             visualTheme:
               typeof parsed.visualTheme === "string" ? parsed.visualTheme : undefined,
@@ -4632,6 +4694,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           watchlist: ui.watchlist,
           scrubIndex,
           isTelemetryPlaying,
+          telemetryReplaySpeed,
           themeMode: ui.themeMode,
           visualTheme: ui.visualTheme,
         }),
@@ -4648,6 +4711,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     ui.themeMode,
     ui.visualTheme,
     ui.watchlist,
+    telemetryReplaySpeed,
   ]);
 
   useEffect(() => {
@@ -4697,6 +4761,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   );
   const activeTelemetrySample =
     data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
+  const isTelemetryReplay = data.sources.telemetry.status !== "live";
 
   const visualThemeOptions = useMemo<VisualThemeOption[]>(() => {
     const teams = new Map<string, { accent: string; drivers: string[] }>();
@@ -4774,9 +4839,15 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     logDashboardInteraction("telemetry_playback", isTelemetryPlaying ? "pause" : "play");
   };
 
+  const changeTelemetryReplaySpeed = (speed: TelemetryReplaySpeed) => {
+    dispatch(setTelemetryReplaySpeed(speed));
+    logDashboardInteraction("telemetry_replay_speed", `${speed}x`);
+  };
+
   useEffect(() => {
     if (
       !isTelemetryPlaying ||
+      isTelemetryReplay ||
       data.liveTiming.connection === "offline" ||
       !data.telemetrySamples.length
     ) {
@@ -4795,36 +4866,71 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     data.telemetrySamples.length,
     dispatch,
     isTelemetryPlaying,
+    isTelemetryReplay,
   ]);
 
   useEffect(() => {
-    if (!isTelemetryPlaying || !data.telemetrySamples.length) {
+    if (effectiveScrubIndex === replayIndexRef.current) {
+      return;
+    }
+    const activeSample = data.telemetrySamples[effectiveScrubIndex];
+    replayIndexRef.current = effectiveScrubIndex;
+    replayElapsedRef.current = activeSample?.elapsed ?? 0;
+  }, [data.telemetrySamples, effectiveScrubIndex]);
+
+  useEffect(() => {
+    if (
+      !isTelemetryPlaying ||
+      !isTelemetryReplay ||
+      !data.telemetrySamples.length
+    ) {
       lastPlayFrameRef.current = null;
       return;
     }
 
-    let frame = 0;
-    const tick = (timestamp: number) => {
+    const samples = data.telemetrySamples;
+    const firstElapsed = samples[0]?.elapsed ?? 0;
+    const lastElapsed = samples.at(-1)?.elapsed ?? firstElapsed;
+    const replayDuration = Math.max(0.001, lastElapsed - firstElapsed);
+    const tick = () => {
+      const timestamp = performance.now();
       const previous = lastPlayFrameRef.current ?? timestamp;
-      if (timestamp - previous >= 100 && data.liveTiming.connection === "offline") {
-        dispatch(
-          setScrubIndex(
-            (effectiveScrubIndex + 1) % Math.max(1, data.telemetrySamples.length),
-          ),
-        );
-        lastPlayFrameRef.current = timestamp;
+      const frameDelta = Math.min(1_000, Math.max(0, timestamp - previous));
+      lastPlayFrameRef.current = timestamp;
+
+      let nextElapsed =
+        replayElapsedRef.current +
+        (frameDelta / 1_000) * telemetryReplaySpeed;
+      if (nextElapsed > lastElapsed) {
+        nextElapsed =
+          firstElapsed + ((nextElapsed - firstElapsed) % replayDuration);
       }
-      frame = window.requestAnimationFrame(tick);
+      replayElapsedRef.current = nextElapsed;
+
+      let nextIndex = 0;
+      for (let index = 1; index < samples.length; index += 1) {
+        const sample = samples[index];
+        if (!sample || sample.elapsed > nextElapsed) {
+          break;
+        }
+        nextIndex = index;
+      }
+
+      if (nextIndex !== replayIndexRef.current) {
+        replayIndexRef.current = nextIndex;
+        dispatch(setScrubIndex(nextIndex));
+      }
     };
 
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
+    const timer = window.setInterval(tick, 50);
+    tick();
+    return () => window.clearInterval(timer);
   }, [
-    data.liveTiming.connection,
-    data.telemetrySamples.length,
+    data.telemetrySamples,
     dispatch,
-    effectiveScrubIndex,
     isTelemetryPlaying,
+    isTelemetryReplay,
+    telemetryReplaySpeed,
   ]);
 
   useEffect(() => {
@@ -5026,7 +5132,10 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 driverLabel={data.telemetryDriverLabel}
                 insights={data.telemetryInsights}
                 isPlaying={isTelemetryPlaying}
+                isReplay={isTelemetryReplay}
                 onTogglePlayback={togglePlayback}
+                onReplaySpeedChange={changeTelemetryReplaySpeed}
+                replaySpeed={telemetryReplaySpeed}
                 sourceMeta={data.sources.telemetry}
                 samples={data.telemetrySamples}
                 session={data.telemetrySession}

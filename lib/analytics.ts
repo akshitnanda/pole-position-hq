@@ -5,6 +5,7 @@ type InteractionName =
   | "driver_select"
   | "telemetry_scrub"
   | "telemetry_playback"
+  | "telemetry_replay_speed"
   | "fantasy_builder"
   | "share_driver_card"
   | "voice_driver_select"
