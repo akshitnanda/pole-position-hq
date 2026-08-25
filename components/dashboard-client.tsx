@@ -4452,6 +4452,13 @@ function WeekendInfoPanel({
 }) {
   const feeds = [
     dashboard.sources.schedule,
+    dashboard.sources.weather ?? {
+      label: "Weather",
+      source: "Open-Meteo hourly forecast",
+      status: "empty" as const,
+      updatedAt: null,
+      note: "Refresh to check the session-time forecast.",
+    },
     dashboard.sources.telemetry,
     dashboard.sources.fantasy,
     dashboard.sources.activity,
@@ -4530,7 +4537,7 @@ function WeekendInfoPanel({
                       <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
                         <span>
                           {weather
-                            ? `${weather.temperatureC}C / ${weather.rainChance}% rain / ${weather.summary}`
+                            ? `${weather.temperatureC}C / ${weather.rainChance}% rain / ${weather.summary} forecast`
                             : "Weather source unavailable"}
                         </span>
                         <a href={links.google} target="_blank" rel="noreferrer" className="underline underline-offset-2">

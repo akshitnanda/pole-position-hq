@@ -316,6 +316,7 @@ export type DashboardData = {
   };
   sources: {
     schedule: DashboardFeedMeta;
+    weather: DashboardFeedMeta;
     telemetry: DashboardFeedMeta;
     fantasy: DashboardFeedMeta;
     activity: DashboardFeedMeta;
