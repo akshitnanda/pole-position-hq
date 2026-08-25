@@ -6,17 +6,22 @@ import {
   ArrowDown,
   ArrowUpRight,
   ArrowUp,
+  Bell,
+  BellOff,
   CalendarDays,
   Check,
   ChevronDown,
   Clock3,
   Flag,
   Gauge,
+  Headphones,
   Map as MapIcon,
   MessageCircle,
   Minus,
   Newspaper,
   Palette,
+  Pause,
+  Play,
   Share2,
   Mic,
   Radio,
@@ -55,16 +60,34 @@ import {
   setActiveTab as setActiveTabAction,
   setScrubIndex,
   setSelectedDriverId,
+  setSessionAlertLeadMinutes,
   setTelemetryPlaying,
+  setTelemetryReplaySpeed,
   setVisualTheme,
   toggleWatchlist,
+  type SessionAlertLeadMinutes,
+  type TelemetryReplaySpeed,
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
+const TELEMETRY_REPLAY_SPEEDS = [0.5, 1, 2, 4, 8, 16] as const;
+const SESSION_ALERT_LEAD_TIMES = [0, 5, 15, 30] as const;
 type DashboardTab = "live" | "analysis" | "weekend" | "season";
+
+function normalizeTelemetryReplaySpeed(value: unknown): TelemetryReplaySpeed {
+  return TELEMETRY_REPLAY_SPEEDS.includes(value as TelemetryReplaySpeed)
+    ? (value as TelemetryReplaySpeed)
+    : 1;
+}
+
+function normalizeSessionAlertLeadMinutes(value: unknown): SessionAlertLeadMinutes {
+  return SESSION_ALERT_LEAD_TIMES.includes(value as SessionAlertLeadMinutes)
+    ? (value as SessionAlertLeadMinutes)
+    : 0;
+}
 
 type VisualThemeOption = {
   id: string;
@@ -919,20 +942,6 @@ function useTelemetryWorker(samples: DashboardData["telemetrySamples"]) {
   }, [samples]);
 
   return metrics;
-}
-
-function buildRadioSnippet(driver: DriverInsight | null) {
-  if (!driver) {
-    return "Awaiting driver channel.";
-  }
-
-  const templates = [
-    `${driver.abbreviation}: balance is coming alive through sector two.`,
-    `${driver.abbreviation}: copy, tyre phase looks stable.`,
-    `${driver.abbreviation}: push window available after the next split.`,
-  ];
-
-  return templates[driver.standingPosition % templates.length];
 }
 
 function buildCalendarLinks(session: SessionSummary) {
@@ -1870,7 +1879,10 @@ function TelemetryExperiencePanel({
   driverLabel,
   insights,
   isPlaying,
+  isReplay,
   onTogglePlayback,
+  onReplaySpeedChange,
+  replaySpeed,
   sourceMeta,
   samples,
   session,
@@ -1883,7 +1895,10 @@ function TelemetryExperiencePanel({
   driverLabel: string | null;
   insights: DashboardData["telemetryInsights"];
   isPlaying: boolean;
+  isReplay: boolean;
   onTogglePlayback: () => void;
+  onReplaySpeedChange: (speed: TelemetryReplaySpeed) => void;
+  replaySpeed: TelemetryReplaySpeed;
   sourceMeta: DashboardData["sources"]["telemetry"];
   samples: DashboardData["telemetrySamples"];
   session: SessionSummary | null;
@@ -1993,15 +2008,46 @@ function TelemetryExperiencePanel({
           <button
             type="button"
             onClick={onTogglePlayback}
+            aria-keyshortcuts="Space"
             className={`glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)] ${FOCUS_RING}`}
           >
             {isPlaying ? "Pause" : "Play"}
           </button>
-          <FunBadge label="Telemetry hero" tone="dark" />
-          <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
-            <Radio size={14} />
-            /car_data
-          </div>
+          {isReplay ? (
+            <div
+              className="glass-pill inline-flex items-center gap-1 rounded-full p-1"
+              role="group"
+              aria-label="Telemetry replay speed"
+            >
+              {TELEMETRY_REPLAY_SPEEDS.map((speed) => {
+                const active = speed === replaySpeed;
+                return (
+                  <button
+                    key={speed}
+                    type="button"
+                    onClick={() => onReplaySpeedChange(speed)}
+                    aria-pressed={active}
+                    className={`rounded-full px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] transition ${FOCUS_RING}`}
+                    style={{
+                      color: active ? "var(--theme-on-accent)" : "var(--muted)",
+                      background: active ? "var(--team-accent)" : "transparent",
+                    }}
+                  >
+                    {speed}x
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {debugMode ? (
+            <>
+              <FunBadge label="Telemetry hero" tone="dark" />
+              <div className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs uppercase tracking-[0.18em] text-[var(--muted)]">
+                <Radio size={14} />
+                /car_data
+              </div>
+            </>
+          ) : null}
           <span
             className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] ${feedTone.className}`}
           >
@@ -2075,7 +2121,14 @@ function TelemetryExperiencePanel({
               {debugMode ? "drag or hover to sync the map" : "drag or hover to inspect the lap"}
             </span>
           </div>
-          <div className="mb-3 text-[11px] text-[var(--muted)]">{sourceMeta.note}</div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--muted)]">
+            <span>{sourceMeta.note}</span>
+            {isReplay ? (
+              <span className="telemetry-text uppercase tracking-[0.12em]">
+                {isPlaying ? "Playing" : "Paused"} / {replaySpeed}x / Loop
+              </span>
+            ) : null}
+          </div>
           <div className={`mb-3 grid gap-2 ${debugMode ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             <div className="glass-pill rounded-[16px] px-3 py-2.5">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -2333,6 +2386,7 @@ function LiveActionDock({
   insights,
   liveTiming,
   telemetrySamples,
+  teamRadio,
   scrubIndex,
   drivers,
   selectedDriverId,
@@ -2346,6 +2400,7 @@ function LiveActionDock({
   insights: DashboardData["telemetryInsights"];
   liveTiming: DashboardData["liveTiming"];
   telemetrySamples: DashboardData["telemetrySamples"];
+  teamRadio: DashboardData["teamRadio"];
   scrubIndex: number;
   drivers: DriverInsight[];
   selectedDriverId: string;
@@ -2354,6 +2409,13 @@ function LiveActionDock({
 }) {
   const pathRef = useRef<SVGPathElement | null>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const selectedDriverRadioClips = selectedDriver
+    ? teamRadio.clips.filter(
+        (clip) =>
+          clip.driverId === selectedDriver.id ||
+          clip.driverNumber === selectedDriver.sessionDriverNumber,
+      )
+    : [];
   const layout = getTrackLayout(layoutKey, circuitName);
   const activeSample =
     telemetrySamples[clampIndex(scrubIndex, Math.max(1, telemetrySamples.length))] ?? null;
@@ -2715,8 +2777,12 @@ function LiveActionDock({
                 </span>
               </div>
               <div className="mt-1 flex items-start gap-2 text-xs text-[var(--muted)]">
-                <MessageCircle size={14} className="mt-0.5 shrink-0" />
-                <span className="line-clamp-2">{buildRadioSnippet(selectedDriver)}</span>
+                <Headphones size={14} className="mt-0.5 shrink-0" />
+                <span className="line-clamp-2">
+                  {selectedDriverRadioClips.length
+                    ? `${selectedDriverRadioClips.length} official ${teamRadio.session?.circuitName ?? "session"} archive ${selectedDriverRadioClips.length === 1 ? "clip" : "clips"} in Team Radio.`
+                    : `No official radio clip released for this driver in the ${teamRadio.session?.circuitName ?? "session"} archive.`}
+                </span>
               </div>
             </div>
           </div>
@@ -3173,6 +3239,168 @@ function RaceControlPanel({
           </div>
         )}
       </div>
+    </Panel>
+  );
+}
+
+function TeamRadioPanel({
+  radio,
+  sourceMeta,
+}: {
+  radio: DashboardData["teamRadio"];
+  sourceMeta: DashboardData["sources"]["teamRadio"];
+}) {
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [failedClipId, setFailedClipId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const sourceTone = getFeedTone(sourceMeta.status);
+  const visibleClips = expanded ? radio.clips : radio.clips.slice(0, 3);
+  const hiddenClipCount = Math.max(radio.clips.length - visibleClips.length, 0);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  const toggleClip = async (clip: DashboardData["teamRadio"]["clips"][number]) => {
+    if (activeClipId === clip.id && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setActiveClipId(null);
+      return;
+    }
+
+    audioRef.current?.pause();
+    const audio = new Audio(clip.recordingUrl);
+    audio.preload = "none";
+    audio.onended = () => {
+      audioRef.current = null;
+      setActiveClipId(null);
+    };
+    audio.onerror = () => {
+      audioRef.current = null;
+      setActiveClipId(null);
+      setFailedClipId(clip.id);
+    };
+    audioRef.current = audio;
+    setActiveClipId(clip.id);
+    setFailedClipId(null);
+    logDashboardInteraction("team_radio_play", clip.driverId ?? clip.driverNumber);
+
+    try {
+      await audio.play();
+    } catch {
+      audioRef.current = null;
+      setActiveClipId(null);
+      setFailedClipId(clip.id);
+    }
+  };
+
+  return (
+    <Panel tint="var(--team-accent-wash)">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Team radio</div>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}
+            >
+              {sourceTone.label}
+            </span>
+          </div>
+          <div className="section-title mt-2 text-base font-semibold sm:text-xl">
+            {radio.session
+              ? `${radio.session.circuitName} radio archive`
+              : "Radio archive unavailable"}
+          </div>
+          <div className="section-copy mt-1 text-[13px]">
+            {radio.session
+              ? `${radio.session.sessionName} / officially released clips only`
+              : "A session key is required before audio can be loaded."}
+          </div>
+        </div>
+        <Headphones size={18} className="mt-1 shrink-0 text-[var(--muted)]" />
+      </div>
+
+      {radio.clips.length ? (
+        <div className="mt-4 grid gap-2 md:grid-cols-3">
+          {visibleClips.map((clip) => {
+            const playing = activeClipId === clip.id;
+            const failed = failedClipId === clip.id;
+            return (
+              <button
+                key={clip.id}
+                type="button"
+                onClick={() => void toggleClip(clip)}
+                aria-label={`${playing ? "Pause" : "Play"} ${clip.driverLabel} team radio`}
+                aria-pressed={playing}
+                className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-left transition hover:-translate-y-px ${FOCUS_RING}`}
+              >
+                <span
+                  className="grid h-9 w-9 place-items-center rounded-full"
+                  style={{
+                    color: `#${clip.teamColor}`,
+                    background: rgba(clip.teamColor, 0.14),
+                  }}
+                >
+                  {playing ? <Pause size={14} /> : <Play size={14} />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
+                    {clip.driverLabel}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                    {clip.abbreviation} / {formatTrackDate(clip.recordedAt, radio.session?.gmtOffset ?? "+00:00")}
+                  </span>
+                </span>
+                <span className={`text-[9px] font-semibold uppercase tracking-[0.12em] ${failed ? "text-[#c51b17]" : "text-[var(--muted)]"}`}>
+                  {failed ? "Unavailable" : playing ? "Playing" : "Clip"}
+                </span>
+              </button>
+            );
+          })}
+
+          {radio.clips.length > 3 ? (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => {
+                if (expanded && activeClipId && !radio.clips.slice(0, 3).some((clip) => clip.id === activeClipId)) {
+                  audioRef.current?.pause();
+                  audioRef.current = null;
+                  setActiveClipId(null);
+                }
+                setExpanded((current) => !current);
+              }}
+              className={`flex items-center justify-center gap-2 rounded-[12px] border border-dashed border-[var(--line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition hover:border-[var(--team-accent)] hover:text-[var(--foreground)] md:col-span-3 ${FOCUS_RING}`}
+            >
+              {expanded ? "Show fewer" : `Show ${hiddenClipCount} more`}
+              <ChevronDown
+                size={13}
+                className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-[14px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-4 py-5">
+          <div className="text-sm font-semibold text-[var(--foreground)]">
+            No released radio for this session
+          </div>
+          <div className="mt-1 text-xs leading-5 text-[var(--muted)]">
+            {radio.note}
+          </div>
+        </div>
+      )}
+
+      {radio.clips.length ? (
+        <div className="mt-3 border-t border-[var(--line)] pt-3 text-xs leading-5 text-[var(--muted)]">
+          {radio.note}
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -4218,8 +4446,14 @@ function RaceIntelPanel({
 
 function WeekendInfoPanel({
   dashboard,
+  alertLeadMinutes,
+  notificationPermission,
+  onAlertLeadChange,
 }: {
   dashboard: DashboardData;
+  alertLeadMinutes: SessionAlertLeadMinutes;
+  notificationPermission: "default" | "granted" | "denied" | "unsupported";
+  onAlertLeadChange: (leadMinutes: SessionAlertLeadMinutes) => void;
 }) {
   const feeds = [
     dashboard.sources.schedule,
@@ -4227,8 +4461,17 @@ function WeekendInfoPanel({
     dashboard.sources.fantasy,
     dashboard.sources.activity,
     dashboard.sources.raceIntel,
+    dashboard.sources.teamRadio ?? {
+      label: "Team radio",
+      source: "OpenF1 /team_radio",
+      status: "empty" as const,
+      updatedAt: null,
+      note: "Refresh to check official radio coverage for the archived session.",
+    },
   ];
   const nextSession = dashboard.nextSession;
+  const reminderArmed =
+    alertLeadMinutes > 0 && notificationPermission === "granted";
 
   return (
     <Panel>
@@ -4248,7 +4491,10 @@ function WeekendInfoPanel({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatChip label="Season" value={`${dashboard.season}`} />
           <StatChip label="Sessions" value={`${dashboard.nextSessions.length}`} />
-          <StatChip label="Circuit" value={dashboard.trackMap.circuitName} />
+          <StatChip
+            label="Circuit"
+            value={nextSession?.circuitName ?? dashboard.trackMap.circuitName}
+          />
         </div>
       </div>
 
@@ -4321,13 +4567,87 @@ function WeekendInfoPanel({
 
         <div className="grid gap-4">
           <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
-            <div className="eyebrow">Circuit card</div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="eyebrow">Session reminder</div>
+                <div className="section-title mt-2 text-base font-semibold">
+                  {notificationPermission === "denied"
+                    ? "Reminder blocked"
+                    : reminderArmed
+                      ? `${alertLeadMinutes} min before lights on`
+                      : "Stay ahead of the session"}
+                </div>
+              </div>
+              {reminderArmed ? (
+                <Bell size={16} className="mt-0.5 text-[var(--team-accent)]" />
+              ) : (
+                <BellOff size={16} className="mt-0.5 text-[var(--muted)]" />
+              )}
+            </div>
+
+            {nextSession ? (
+              <>
+                <div className="mt-3 grid grid-cols-4 gap-1.5" aria-label="Session reminder lead time">
+                  {SESSION_ALERT_LEAD_TIMES.map((leadMinutes) => {
+                    const selected = leadMinutes
+                      ? reminderArmed && alertLeadMinutes === leadMinutes
+                      : !reminderArmed;
+                    const blocked =
+                      leadMinutes > 0 &&
+                      (notificationPermission === "denied" ||
+                        notificationPermission === "unsupported");
+
+                    return (
+                      <button
+                        key={leadMinutes}
+                        type="button"
+                        aria-pressed={selected}
+                        disabled={blocked}
+                        onClick={() => onAlertLeadChange(leadMinutes)}
+                        className={`rounded-[10px] border px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                          selected
+                            ? "border-[var(--team-accent)] bg-[var(--team-accent)] text-[var(--theme-on-accent)]"
+                            : "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                        } ${FOCUS_RING}`}
+                      >
+                        {leadMinutes ? `${leadMinutes}m` : "Off"}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                  {notificationPermission === "denied"
+                    ? "Browser notifications are blocked for this site. Re-enable them in site settings to arm a reminder."
+                    : notificationPermission === "unsupported"
+                      ? "This browser does not support local notifications. Use a calendar link for a reliable reminder."
+                      : reminderArmed
+                        ? `Armed for ${nextSession.sessionName}. Keep this dashboard open; use a calendar link when you will be away.`
+                        : "Choose a lead time to request browser permission. Calendar links work when this dashboard is closed."}
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                A reminder can be armed when the schedule feed publishes the next session.
+              </div>
+            )}
+          </div>
+
+          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+            <div className="eyebrow">Data scope</div>
             <div className="section-title mt-2 text-base font-semibold">
-              {dashboard.trackMap.circuitName}
+              Session boundaries
             </div>
             <div className="mt-3 grid gap-2">
-              <MiniStat icon={<MapIcon size={14} />} label="Layout" value={dashboard.trackMap.layoutKey} />
-              <MiniStat icon={<Users size={14} />} label="Cars mapped" value={`${dashboard.trackMap.cars.length}`} />
+              <MiniStat
+                icon={<Flag size={14} />}
+                label="Next weekend"
+                value={nextSession?.circuitName ?? "Awaiting schedule"}
+              />
+              <MiniStat
+                icon={<MapIcon size={14} />}
+                label="Replay archive"
+                value={dashboard.trackMap.circuitName}
+              />
               <MiniStat
                 icon={<Radio size={14} />}
                 label="Telemetry"
@@ -4474,6 +4794,21 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       note: "Refresh to load two session-matched telemetry traces.",
       traces: [],
     };
+  const teamRadio: DashboardData["teamRadio"] = data.teamRadio ?? {
+    session: data.telemetrySession,
+    status: "empty",
+    updatedAt: null,
+    note: "Refresh to check whether F1 released official radio clips for this session.",
+    clips: [],
+  };
+  const teamRadioSource: DashboardData["sources"]["teamRadio"] =
+    data.sources.teamRadio ?? {
+      label: "Team radio",
+      source: "OpenF1 /team_radio",
+      status: "empty",
+      updatedAt: null,
+      note: teamRadio.note,
+    };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
   const error = query.error;
@@ -4508,11 +4843,23 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const scrubIndex = ui.scrubIndex;
   const activeTab = normalizeDashboardTab(ui.activeTab) ?? "live";
   const isTelemetryPlaying = ui.isTelemetryPlaying;
+  const telemetryReplaySpeed = normalizeTelemetryReplaySpeed(
+    ui.telemetryReplaySpeed,
+  );
+  const sessionAlertLeadMinutes = normalizeSessionAlertLeadMinutes(
+    ui.sessionAlertLeadMinutes,
+  );
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    "default" | "granted" | "denied" | "unsupported"
+  >("default");
   const scrubFrameRef = useRef<number | null>(null);
   const lastPlayFrameRef = useRef<number | null>(null);
+  const replayElapsedRef = useRef(0);
+  const replayIndexRef = useRef(0);
+  const deliveredAlertKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -4545,6 +4892,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           watchlist?: string[];
           scrubIndex?: number;
           isTelemetryPlaying?: boolean;
+          telemetryReplaySpeed?: number;
+          sessionAlertLeadMinutes?: number;
           themeMode?: "system" | "light" | "dark";
           visualTheme?: string;
         };
@@ -4564,6 +4913,12 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
               typeof parsed.isTelemetryPlaying === "boolean"
                 ? parsed.isTelemetryPlaying
                 : undefined,
+            telemetryReplaySpeed: normalizeTelemetryReplaySpeed(
+              parsed.telemetryReplaySpeed,
+            ),
+            sessionAlertLeadMinutes: normalizeSessionAlertLeadMinutes(
+              parsed.sessionAlertLeadMinutes,
+            ),
             themeMode: parsed.themeMode,
             visualTheme:
               typeof parsed.visualTheme === "string" ? parsed.visualTheme : undefined,
@@ -4632,6 +4987,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           watchlist: ui.watchlist,
           scrubIndex,
           isTelemetryPlaying,
+          telemetryReplaySpeed,
+          sessionAlertLeadMinutes,
           themeMode: ui.themeMode,
           visualTheme: ui.visualTheme,
         }),
@@ -4643,11 +5000,92 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     activeTab,
     isTelemetryPlaying,
     prefsLoaded,
+    sessionAlertLeadMinutes,
     scrubIndex,
     selectedDriverId,
     ui.themeMode,
     ui.visualTheme,
     ui.watchlist,
+    telemetryReplaySpeed,
+  ]);
+
+  useEffect(() => {
+    const syncNotificationPermission = () => {
+      setNotificationPermission(
+        "Notification" in window ? Notification.permission : "unsupported",
+      );
+    };
+
+    syncNotificationPermission();
+    window.addEventListener("focus", syncNotificationPermission);
+    return () => window.removeEventListener("focus", syncNotificationPermission);
+  }, []);
+
+  useEffect(() => {
+    const session = data.nextSession;
+    if (
+      !prefsLoaded ||
+      !session ||
+      !sessionAlertLeadMinutes ||
+      notificationPermission !== "granted"
+    ) {
+      return;
+    }
+
+    const notifyWhenDue = () => {
+      const startsAt = new Date(session.dateStart).getTime();
+      const now = Date.now();
+      const alertWindowStart = startsAt - sessionAlertLeadMinutes * 60_000;
+      if (now < alertWindowStart || now >= startsAt) {
+        return;
+      }
+
+      const notificationKey = `pphq-session-alert/${session.sessionKey}/${sessionAlertLeadMinutes}`;
+      if (deliveredAlertKeysRef.current.has(notificationKey)) {
+        return;
+      }
+      try {
+        if (window.localStorage.getItem(notificationKey)) {
+          deliveredAlertKeysRef.current.add(notificationKey);
+          return;
+        }
+      } catch {
+        // A notification can still be useful when storage is unavailable.
+      }
+
+      try {
+        const notification = new Notification(
+          `F1 ${session.sessionName} starts in ${sessionAlertLeadMinutes} minutes`,
+          {
+            body: `${session.circuitName} / ${session.location}, ${session.countryName}`,
+            tag: notificationKey,
+          },
+        );
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+        deliveredAlertKeysRef.current.add(notificationKey);
+        logDashboardInteraction("session_alert_fire", String(session.sessionKey));
+      } catch {
+        return;
+      }
+
+      try {
+        window.localStorage.setItem(notificationKey, new Date().toISOString());
+      } catch {
+        // Notification delivery does not depend on preference storage.
+      }
+    };
+
+    notifyWhenDue();
+    const timer = window.setInterval(notifyWhenDue, 30_000);
+    return () => window.clearInterval(timer);
+  }, [
+    data.nextSession,
+    notificationPermission,
+    prefsLoaded,
+    sessionAlertLeadMinutes,
   ]);
 
   useEffect(() => {
@@ -4697,6 +5135,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   );
   const activeTelemetrySample =
     data.telemetrySamples[effectiveScrubIndex] ?? data.telemetrySamples.at(-1) ?? null;
+  const isTelemetryReplay = data.sources.telemetry.status !== "live";
 
   const visualThemeOptions = useMemo<VisualThemeOption[]>(() => {
     const teams = new Map<string, { accent: string; drivers: string[] }>();
@@ -4774,9 +5213,46 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     logDashboardInteraction("telemetry_playback", isTelemetryPlaying ? "pause" : "play");
   };
 
+  const changeTelemetryReplaySpeed = (speed: TelemetryReplaySpeed) => {
+    dispatch(setTelemetryReplaySpeed(speed));
+    logDashboardInteraction("telemetry_replay_speed", `${speed}x`);
+  };
+
+  const changeSessionAlert = async (leadMinutes: SessionAlertLeadMinutes) => {
+    if (!leadMinutes) {
+      dispatch(setSessionAlertLeadMinutes(0));
+      logDashboardInteraction("session_alert_change", "off");
+      return;
+    }
+
+    if (!("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+
+    let permission = Notification.permission;
+    if (permission === "default") {
+      try {
+        permission = await Notification.requestPermission();
+      } catch {
+        permission = "denied";
+      }
+    }
+
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      dispatch(setSessionAlertLeadMinutes(leadMinutes));
+      logDashboardInteraction("session_alert_change", `${leadMinutes}m`);
+    } else {
+      dispatch(setSessionAlertLeadMinutes(0));
+      logDashboardInteraction("session_alert_change", "blocked");
+    }
+  };
+
   useEffect(() => {
     if (
       !isTelemetryPlaying ||
+      isTelemetryReplay ||
       data.liveTiming.connection === "offline" ||
       !data.telemetrySamples.length
     ) {
@@ -4795,36 +5271,71 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     data.telemetrySamples.length,
     dispatch,
     isTelemetryPlaying,
+    isTelemetryReplay,
   ]);
 
   useEffect(() => {
-    if (!isTelemetryPlaying || !data.telemetrySamples.length) {
+    if (effectiveScrubIndex === replayIndexRef.current) {
+      return;
+    }
+    const activeSample = data.telemetrySamples[effectiveScrubIndex];
+    replayIndexRef.current = effectiveScrubIndex;
+    replayElapsedRef.current = activeSample?.elapsed ?? 0;
+  }, [data.telemetrySamples, effectiveScrubIndex]);
+
+  useEffect(() => {
+    if (
+      !isTelemetryPlaying ||
+      !isTelemetryReplay ||
+      !data.telemetrySamples.length
+    ) {
       lastPlayFrameRef.current = null;
       return;
     }
 
-    let frame = 0;
-    const tick = (timestamp: number) => {
+    const samples = data.telemetrySamples;
+    const firstElapsed = samples[0]?.elapsed ?? 0;
+    const lastElapsed = samples.at(-1)?.elapsed ?? firstElapsed;
+    const replayDuration = Math.max(0.001, lastElapsed - firstElapsed);
+    const tick = () => {
+      const timestamp = performance.now();
       const previous = lastPlayFrameRef.current ?? timestamp;
-      if (timestamp - previous >= 100 && data.liveTiming.connection === "offline") {
-        dispatch(
-          setScrubIndex(
-            (effectiveScrubIndex + 1) % Math.max(1, data.telemetrySamples.length),
-          ),
-        );
-        lastPlayFrameRef.current = timestamp;
+      const frameDelta = Math.min(1_000, Math.max(0, timestamp - previous));
+      lastPlayFrameRef.current = timestamp;
+
+      let nextElapsed =
+        replayElapsedRef.current +
+        (frameDelta / 1_000) * telemetryReplaySpeed;
+      if (nextElapsed > lastElapsed) {
+        nextElapsed =
+          firstElapsed + ((nextElapsed - firstElapsed) % replayDuration);
       }
-      frame = window.requestAnimationFrame(tick);
+      replayElapsedRef.current = nextElapsed;
+
+      let nextIndex = 0;
+      for (let index = 1; index < samples.length; index += 1) {
+        const sample = samples[index];
+        if (!sample || sample.elapsed > nextElapsed) {
+          break;
+        }
+        nextIndex = index;
+      }
+
+      if (nextIndex !== replayIndexRef.current) {
+        replayIndexRef.current = nextIndex;
+        dispatch(setScrubIndex(nextIndex));
+      }
     };
 
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
+    const timer = window.setInterval(tick, 50);
+    tick();
+    return () => window.clearInterval(timer);
   }, [
-    data.liveTiming.connection,
-    data.telemetrySamples.length,
+    data.telemetrySamples,
     dispatch,
-    effectiveScrubIndex,
     isTelemetryPlaying,
+    isTelemetryReplay,
+    telemetryReplaySpeed,
   ]);
 
   useEffect(() => {
@@ -4958,7 +5469,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "live" ? (
         <div className="grid gap-4 sm:gap-5">
-          <div className="order-2 md:order-1">
+          <div className="order-2 min-w-0 md:order-1">
             <HeaderHero
               dashboard={data}
               selectedDriver={selectedDriver}
@@ -4967,13 +5478,16 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             />
           </div>
 
-          <div className="order-3 md:order-2">
+          <div className="order-3 grid min-w-0 gap-4 sm:gap-5 md:order-2">
             <WidgetBoundary label="Race control">
               <RaceControlPanel raceControl={data.raceControl} initialNow={snapshotNow} />
             </WidgetBoundary>
+            <WidgetBoundary label="Team radio">
+              <TeamRadioPanel radio={teamRadio} sourceMeta={teamRadioSource} />
+            </WidgetBoundary>
           </div>
 
-          <div className="order-1 md:order-3">
+          <div className="order-1 min-w-0 md:order-3">
             <WidgetBoundary label="Live timing">
               <TimingBoardPanel
                 timing={timingTower}
@@ -4983,7 +5497,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             </WidgetBoundary>
           </div>
 
-          <div className="order-4 grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(420px,1.15fr)]">
+          <div className="order-4 grid min-w-0 gap-4 sm:gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(420px,1.15fr)]">
             <BriefingPanel
               dashboard={data}
               selectedDriver={selectedDriver}
@@ -4998,6 +5512,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 insights={data.telemetryInsights}
                 liveTiming={data.liveTiming}
                 telemetrySamples={data.telemetrySamples}
+                teamRadio={teamRadio}
                 scrubIndex={effectiveScrubIndex}
                 drivers={data.standings}
                 selectedDriverId={effectiveSelectedDriverId}
@@ -5026,7 +5541,10 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 driverLabel={data.telemetryDriverLabel}
                 insights={data.telemetryInsights}
                 isPlaying={isTelemetryPlaying}
+                isReplay={isTelemetryReplay}
                 onTogglePlayback={togglePlayback}
+                onReplaySpeedChange={changeTelemetryReplaySpeed}
+                replaySpeed={telemetryReplaySpeed}
                 sourceMeta={data.sources.telemetry}
                 samples={data.telemetrySamples}
                 session={data.telemetrySession}
@@ -5069,7 +5587,12 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "weekend" ? (
         <div className="grid gap-4 sm:gap-5">
-          <WeekendInfoPanel dashboard={data} />
+          <WeekendInfoPanel
+            dashboard={data}
+            alertLeadMinutes={sessionAlertLeadMinutes}
+            notificationPermission={notificationPermission}
+            onAlertLeadChange={(leadMinutes) => void changeSessionAlert(leadMinutes)}
+          />
           <NewsroomPanel activity={data.activity} />
         </div>
       ) : null}

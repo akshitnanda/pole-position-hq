@@ -99,6 +99,14 @@ type OpenF1Pit = {
   pit_duration: number | null;
 };
 
+type OpenF1TeamRadio = {
+  date: string;
+  driver_number: number;
+  meeting_key: number;
+  recording_url: string;
+  session_key: number;
+};
+
 type OpenF1SessionResult = {
   driver_number: number;
   position: number | null;
@@ -192,7 +200,7 @@ function normalizeTeamColor(value: string | null | undefined) {
   return /^[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : "E10600";
 }
 
-function resolveHeadshotUrl(value: string | null | undefined) {
+function resolveHttpsUrl(value: string | null | undefined) {
   if (!value) {
     return null;
   }
@@ -203,6 +211,10 @@ function resolveHeadshotUrl(value: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+function resolveHeadshotUrl(value: string | null | undefined) {
+  return resolveHttpsUrl(value);
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -1871,6 +1883,11 @@ export async function getDashboardData(): Promise<DashboardData> {
         new Date(recentRaceSession.date_end).getTime() - 40 * 60_000,
       ).toISOString()
     : null;
+  const teamRadioRowsPromise = recentRaceSession
+    ? fetchArrayOrEmpty<OpenF1TeamRadio>(
+        `${OPEN_F1_BASE}/team_radio?session_key=${recentRaceSession.session_key}`,
+      )
+    : Promise.resolve<OpenF1TeamRadio[]>([]);
   const sessionResults = recentRaceSession
     ? await fetchArrayOrEmpty<OpenF1SessionResult>(
         `${OPEN_F1_BASE}/session_result?session_key=${recentRaceSession.session_key}`,
@@ -1913,6 +1930,34 @@ export async function getDashboardData(): Promise<DashboardData> {
   const driversBySessionNumber = new Map(
     driverInsights.map((driver) => [Number(driver.sessionDriverNumber), driver]),
   );
+  const teamRadioClips: DashboardData["teamRadio"]["clips"] = (
+    await teamRadioRowsPromise
+  )
+    .flatMap((row) => {
+      const recordingUrl = resolveHttpsUrl(row.recording_url);
+      if (!recordingUrl) {
+        return [];
+      }
+
+      const driver = driversBySessionNumber.get(row.driver_number) ?? null;
+      return [
+        {
+          id: `radio-${row.session_key}-${row.driver_number}-${row.date}`,
+          driverId: driver?.id ?? null,
+          driverNumber: String(row.driver_number),
+          driverLabel: driver?.fullName ?? `Car ${row.driver_number}`,
+          abbreviation: driver?.abbreviation ?? `#${row.driver_number}`,
+          teamColor: driver?.teamColor ?? "697386",
+          recordedAt: row.date,
+          recordingUrl,
+        },
+      ];
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime(),
+    )
+    .slice(0, 6);
   const comparisonDrivers = sessionResults
     .slice()
     .sort((a, b) => (a.position ?? 99) - (b.position ?? 99))
@@ -2140,10 +2185,28 @@ export async function getDashboardData(): Promise<DashboardData> {
           ? "Upgrade cards require a matching external source mention; timing deltas come from session lap data."
           : "No sourced upgrade mention is available; timing deltas remain grounded in session lap data.",
       },
+      teamRadio: {
+        label: "Team radio",
+        source: "OpenF1 /team_radio",
+        status: teamRadioClips.length ? "cached" : "empty",
+        updatedAt: teamRadioClips.length ? generatedAt : null,
+        note: teamRadioClips.length
+          ? `Officially released clips from the archived ${telemetrySession?.circuitName ?? "race"} session. OpenF1 provides a limited selection, not a complete radio record.`
+          : "F1 released no team-radio clips for this archived session. No substitute audio or transcript is generated.",
+      },
     },
     activity,
     raceIntelligence,
     raceControl,
+    teamRadio: {
+      session: telemetrySession,
+      status: teamRadioClips.length ? "cached" : "empty",
+      updatedAt: teamRadioClips.length ? generatedAt : null,
+      note: teamRadioClips.length
+        ? "Official OpenF1 audio clips only. Transcripts are intentionally omitted until a sourced transcription pipeline is configured."
+        : "No official radio audio is available for this session; 2026 coverage is limited upstream.",
+      clips: teamRadioClips,
+    },
     weekendWeather,
     liveTiming: {
       connection: "offline",

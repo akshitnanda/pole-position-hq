@@ -41,7 +41,7 @@ export const dashboardApi = createApi({
                 draft.sources.telemetry.note =
                   connection === "websocket"
                     ? "Live Timing Protocol frames are streaming through the configured WebSocket."
-                    : "Archived telemetry is playing through a local transport; this is not a live upstream feed.";
+                    : "Archived telemetry is available through a local replay transport; this is not a live upstream feed.";
               });
 
               if (typeof frame.latencyMs === "number") {

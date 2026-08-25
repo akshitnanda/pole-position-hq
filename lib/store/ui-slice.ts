@@ -1,6 +1,8 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 type ThemeMode = "system" | "light" | "dark";
+type TelemetryReplaySpeed = 0.5 | 1 | 2 | 4 | 8 | 16;
+type SessionAlertLeadMinutes = 0 | 5 | 15 | 30;
 
 type DashboardUiState = {
   activeTab: string;
@@ -8,6 +10,8 @@ type DashboardUiState = {
   watchlist: string[];
   scrubIndex: number;
   isTelemetryPlaying: boolean;
+  telemetryReplaySpeed: TelemetryReplaySpeed;
+  sessionAlertLeadMinutes: SessionAlertLeadMinutes;
   themeMode: ThemeMode;
   visualTheme: string;
 };
@@ -18,6 +22,8 @@ const initialState: DashboardUiState = {
   watchlist: [],
   scrubIndex: 0,
   isTelemetryPlaying: true,
+  telemetryReplaySpeed: 1,
+  sessionAlertLeadMinutes: 0,
   themeMode: "system",
   visualTheme: "f1",
 };
@@ -50,6 +56,15 @@ const dashboardUiSlice = createSlice({
     setTelemetryPlaying(state, action: PayloadAction<boolean>) {
       state.isTelemetryPlaying = action.payload;
     },
+    setTelemetryReplaySpeed(state, action: PayloadAction<TelemetryReplaySpeed>) {
+      state.telemetryReplaySpeed = action.payload;
+    },
+    setSessionAlertLeadMinutes(
+      state,
+      action: PayloadAction<SessionAlertLeadMinutes>,
+    ) {
+      state.sessionAlertLeadMinutes = action.payload;
+    },
     setVisualTheme(state, action: PayloadAction<string>) {
       state.visualTheme = action.payload;
     },
@@ -70,10 +85,17 @@ export const {
   setActiveTab,
   setScrubIndex,
   setSelectedDriverId,
+  setSessionAlertLeadMinutes,
   setTelemetryPlaying,
+  setTelemetryReplaySpeed,
   setVisualTheme,
   toggleWatchlist,
 } = dashboardUiSlice.actions;
 
 export const dashboardUiReducer = dashboardUiSlice.reducer;
-export type { DashboardUiState, ThemeMode };
+export type {
+  DashboardUiState,
+  SessionAlertLeadMinutes,
+  TelemetryReplaySpeed,
+  ThemeMode,
+};
