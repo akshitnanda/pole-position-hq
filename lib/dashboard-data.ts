@@ -107,6 +107,19 @@ type OpenF1TeamRadio = {
   session_key: number;
 };
 
+type OpenMeteoGeocoding = {
+  results?: Array<{ latitude: number; longitude: number }>;
+};
+
+type OpenMeteoForecast = {
+  hourly?: {
+    time: string[];
+    temperature_2m: number[];
+    precipitation_probability: number[];
+    weather_code: number[];
+  };
+};
+
 type OpenF1SessionResult = {
   driver_number: number;
   position: number | null;
@@ -251,6 +264,62 @@ async function fetchJson<T>(url: string): Promise<T> {
 async function fetchArrayOrEmpty<T>(url: string): Promise<T[]> {
   try {
     return await fetchJson<T[]>(url);
+  } catch {
+    return [];
+  }
+}
+
+function summarizeWeatherCode(code: number) {
+  if (code === 0) return "Clear";
+  if (code <= 3) return "Cloudy";
+  if (code <= 48) return "Fog";
+  if (code <= 67) return "Rain";
+  if (code <= 77) return "Snow";
+  if (code <= 82) return "Showers";
+  return code >= 95 ? "Storm risk" : "Mixed";
+}
+
+async function fetchWeekendWeather(
+  sessions: OpenF1Session[],
+): Promise<DashboardData["weekendWeather"]> {
+  const context = sessions[0];
+  if (!context) return [];
+
+  try {
+    const query = encodeURIComponent(`${context.location}, ${context.country_name}`);
+    const geocoding = await fetchJson<OpenMeteoGeocoding>(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=1&language=en&format=json`,
+    );
+    const location = geocoding.results?.[0];
+    if (!location) return [];
+
+    const forecast = await fetchJson<OpenMeteoForecast>(
+      `https://api.open-meteo.com/v1/forecast?latitude=${location.latitude}&longitude=${location.longitude}&hourly=temperature_2m,precipitation_probability,weather_code&timezone=GMT&forecast_days=16`,
+    );
+    const hourly = forecast.hourly;
+    if (!hourly?.time.length) return [];
+
+    return sessions.flatMap((session) => {
+      const target = new Date(session.date_start).getTime();
+      let closestIndex = -1;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      hourly.time.forEach((time, index) => {
+        const distance = Math.abs(new Date(`${time}Z`).getTime() - target);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      });
+      if (closestIndex < 0 || closestDistance > 60 * 60_000) return [];
+
+      return [{
+        sessionKey: session.session_key,
+        label: session.session_name,
+        temperatureC: Math.round(hourly.temperature_2m[closestIndex] ?? 0),
+        rainChance: Math.round(hourly.precipitation_probability[closestIndex] ?? 0),
+        summary: summarizeWeatherCode(hourly.weather_code[closestIndex] ?? -1),
+      }];
+    });
   } catch {
     return [];
   }
@@ -1844,6 +1913,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         .filter((session) => session.meeting_key === nextSession.meeting_key)
         .slice(0, 5)
     : [];
+  const weekendWeatherPromise = fetchWeekendWeather(nextMeetingSessions);
 
   const recentRaceSession =
     currentSessions
@@ -2075,7 +2145,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     raceLabel,
   );
   const raceControl = buildRaceControl(nextSession);
-  const weekendWeather: DashboardData["weekendWeather"] = [];
+  const weekendWeather = await weekendWeatherPromise;
 
   return {
     generatedAt,
@@ -2145,6 +2215,15 @@ export async function getDashboardData(): Promise<DashboardData> {
           : currentSessions.length || previousSessions.length
             ? "No upcoming session is currently published in the active season feed."
             : "Schedule feeds were unavailable, so the product is rendering without session timing context.",
+      },
+      weather: {
+        label: "Weather",
+        source: "Open-Meteo hourly forecast",
+        status: weekendWeather.length ? "cached" : "empty",
+        updatedAt: weekendWeather.length ? generatedAt : null,
+        note: weekendWeather.length
+          ? "Location-matched hourly forecast sampled at each published session start time."
+          : "No session-time forecast is currently available for the upcoming weekend.",
       },
       telemetry: {
         label: "Telemetry",
