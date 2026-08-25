@@ -1789,8 +1789,8 @@ function PerformanceProfilePanel({
                   {driver.abbreviation}
                 </div>
                 <FunBadge
-                  label={driver.sentiment.label}
-                  tone={driver.sentiment.label === "Bullish" ? "accent" : "dark"}
+                  label={`P${driver.standingPosition} championship`}
+                  tone={driver.standingPosition <= 3 ? "accent" : "dark"}
                 />
               </div>
               <div className="section-title mt-3 text-[1.55rem] leading-[0.98] font-semibold sm:text-[2.2rem]">
@@ -1810,7 +1810,7 @@ function PerformanceProfilePanel({
               value={`${driver.points}`}
               accent={accent}
             />
-            <StatChip label="Sentiment pulse" value={`${driver.sentiment.score}`} />
+            <StatChip label="Season position" value={`P${driver.standingPosition}`} />
             <StatChip label="Career podiums" value={`${driver.totalPodiums}`} />
           </div>
         </div>
@@ -2871,7 +2871,7 @@ function LiveActionDock({
                       {driver.abbreviation}
                     </div>
                     <div className="mt-1 text-[9px] uppercase tracking-[0.12em] text-[var(--muted)]">
-                      {driver.sentiment.label}
+                      P{driver.standingPosition} / {driver.points} pts
                     </div>
                   </div>
                 </div>
@@ -4130,10 +4130,10 @@ function StatsPanel({
                 </div>
                 <div className="text-right">
                   <div className="telemetry-text text-sm font-semibold">
-                    {driver.sentiment.score}
+                    P{driver.standingPosition}
                   </div>
                   <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
-                    pulse
+                    season
                   </div>
                 </div>
               </div>
@@ -4746,7 +4746,7 @@ function WatchlistPanel({
               </div>
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <StatChip label="Pts" value={`${driver.points}`} accent={driver.teamColor} />
-                <StatChip label="Pulse" value={`${driver.sentiment.score}`} />
+                <StatChip label="Rank" value={`P${driver.standingPosition}`} />
                 <StatChip label="Avg" value={formatLapTime(driver.avgLap)} />
               </div>
               <button
