@@ -2235,14 +2235,14 @@ function AdvancedTelemetryPanel({
   drivers,
   selectedDriver,
   samples,
-  workerMetrics,
+  session,
   onSelectDriver,
 }: {
   activeSample: DashboardData["telemetrySamples"][number] | null;
   drivers: DriverInsight[];
   selectedDriver: DriverInsight | null;
   samples: DashboardData["telemetrySamples"];
-  workerMetrics: TelemetryWorkerMetrics;
+  session: SessionSummary | null;
   onSelectDriver: (driverId: string) => void;
 }) {
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "unsupported">(
@@ -2251,17 +2251,9 @@ function AdvancedTelemetryPanel({
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const predictedLap = useMemo(() => predictNextLapTime(samples), [samples]);
-  const predictionConfidence = useMemo(() => {
-    if (!samples.length || !workerMetrics) {
-      return 0;
-    }
-
-    const stableAcceleration = Math.max(
-      0,
-      1 - Math.abs(workerMetrics.avgAcceleration) / 18,
-    );
-    return Math.round(Math.min(96, 52 + stableAcceleration * 34 + samples.length / 12));
-  }, [samples.length, workerMetrics]);
+  const traceCoverage = Math.round(
+    clampUnit(samples.at(-1)?.trackPosition ?? 0) * 100,
+  );
 
   useEffect(() => {
     return () => recognitionRef.current?.stop();
@@ -2307,11 +2299,14 @@ function AdvancedTelemetryPanel({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="eyebrow">Next level</div>
-            <FunBadge label="Local AI" tone="accent" />
+            <div className="eyebrow">Explainable tools</div>
+            <FunBadge label="Local compute" tone="accent" />
           </div>
           <div className="section-title mt-2 text-base font-semibold sm:text-xl">
-            Prediction suite
+            Telemetry estimator
+          </div>
+          <div className="section-copy mt-1 text-[13px]">
+            Deterministic calculations from the sourced replay trace—not a trained model.
           </div>
         </div>
         {selectedDriver ? (
@@ -2336,17 +2331,17 @@ function AdvancedTelemetryPanel({
             {predictedLap ? formatLapTime(predictedLap) : "--"}
           </div>
           <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
-            Last-3 sample window with throttle, brake, and track progress weighted in.
+            {session ? `${session.circuitName} ${session.sessionName}` : "Session unavailable"} / last three samples weighted by speed, throttle, brake, and track progress.
           </div>
         </div>
 
         <div className="minimal-card rounded-[18px] p-4">
-          <div className="eyebrow">Model confidence</div>
+          <div className="eyebrow">Evidence window</div>
           <div className="telemetry-text mt-2 text-2xl font-semibold text-[var(--foreground)]">
-            {predictionConfidence ? `${predictionConfidence}%` : "--"}
+            {samples.length ? `${samples.length} samples` : "--"}
           </div>
           <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
-            Worker signal: {workerMetrics ? `${workerMetrics.projectedNextSpeed.toFixed(0)} km/h next sample` : "waiting for samples"}.
+            {samples.length ? `${traceCoverage}% replay-path coverage. No statistical confidence score is claimed.` : "Waiting for a sourced telemetry trace."}
           </div>
         </div>
 
@@ -5574,7 +5569,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                   drivers={data.standings}
                   selectedDriver={selectedDriver}
                   samples={data.telemetrySamples}
-                  workerMetrics={telemetryWorkerMetrics}
+                  session={data.telemetrySession}
                   onSelectDriver={selectDriver}
                 />
               </WidgetBoundary>
