@@ -6,6 +6,8 @@ import {
   ArrowDown,
   ArrowUpRight,
   ArrowUp,
+  Bell,
+  BellOff,
   CalendarDays,
   Check,
   ChevronDown,
@@ -58,10 +60,12 @@ import {
   setActiveTab as setActiveTabAction,
   setScrubIndex,
   setSelectedDriverId,
+  setSessionAlertLeadMinutes,
   setTelemetryPlaying,
   setTelemetryReplaySpeed,
   setVisualTheme,
   toggleWatchlist,
+  type SessionAlertLeadMinutes,
   type TelemetryReplaySpeed,
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
@@ -70,12 +74,19 @@ const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] focus-visible:ring-offset-2";
 const TELEMETRY_REPLAY_SPEEDS = [0.5, 1, 2, 4, 8, 16] as const;
+const SESSION_ALERT_LEAD_TIMES = [0, 5, 15, 30] as const;
 type DashboardTab = "live" | "analysis" | "weekend" | "season";
 
 function normalizeTelemetryReplaySpeed(value: unknown): TelemetryReplaySpeed {
   return TELEMETRY_REPLAY_SPEEDS.includes(value as TelemetryReplaySpeed)
     ? (value as TelemetryReplaySpeed)
     : 1;
+}
+
+function normalizeSessionAlertLeadMinutes(value: unknown): SessionAlertLeadMinutes {
+  return SESSION_ALERT_LEAD_TIMES.includes(value as SessionAlertLeadMinutes)
+    ? (value as SessionAlertLeadMinutes)
+    : 0;
 }
 
 type VisualThemeOption = {
@@ -4436,8 +4447,14 @@ function RaceIntelPanel({
 
 function WeekendInfoPanel({
   dashboard,
+  alertLeadMinutes,
+  notificationPermission,
+  onAlertLeadChange,
 }: {
   dashboard: DashboardData;
+  alertLeadMinutes: SessionAlertLeadMinutes;
+  notificationPermission: "default" | "granted" | "denied" | "unsupported";
+  onAlertLeadChange: (leadMinutes: SessionAlertLeadMinutes) => void;
 }) {
   const feeds = [
     dashboard.sources.schedule,
@@ -4454,6 +4471,8 @@ function WeekendInfoPanel({
     },
   ];
   const nextSession = dashboard.nextSession;
+  const reminderArmed =
+    alertLeadMinutes > 0 && notificationPermission === "granted";
 
   return (
     <Panel>
@@ -4473,7 +4492,10 @@ function WeekendInfoPanel({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatChip label="Season" value={`${dashboard.season}`} />
           <StatChip label="Sessions" value={`${dashboard.nextSessions.length}`} />
-          <StatChip label="Circuit" value={dashboard.trackMap.circuitName} />
+          <StatChip
+            label="Circuit"
+            value={nextSession?.circuitName ?? dashboard.trackMap.circuitName}
+          />
         </div>
       </div>
 
@@ -4546,13 +4568,87 @@ function WeekendInfoPanel({
 
         <div className="grid gap-4">
           <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
-            <div className="eyebrow">Circuit card</div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="eyebrow">Session reminder</div>
+                <div className="section-title mt-2 text-base font-semibold">
+                  {notificationPermission === "denied"
+                    ? "Reminder blocked"
+                    : reminderArmed
+                      ? `${alertLeadMinutes} min before lights on`
+                      : "Stay ahead of the session"}
+                </div>
+              </div>
+              {reminderArmed ? (
+                <Bell size={16} className="mt-0.5 text-[var(--team-accent)]" />
+              ) : (
+                <BellOff size={16} className="mt-0.5 text-[var(--muted)]" />
+              )}
+            </div>
+
+            {nextSession ? (
+              <>
+                <div className="mt-3 grid grid-cols-4 gap-1.5" aria-label="Session reminder lead time">
+                  {SESSION_ALERT_LEAD_TIMES.map((leadMinutes) => {
+                    const selected = leadMinutes
+                      ? reminderArmed && alertLeadMinutes === leadMinutes
+                      : !reminderArmed;
+                    const blocked =
+                      leadMinutes > 0 &&
+                      (notificationPermission === "denied" ||
+                        notificationPermission === "unsupported");
+
+                    return (
+                      <button
+                        key={leadMinutes}
+                        type="button"
+                        aria-pressed={selected}
+                        disabled={blocked}
+                        onClick={() => onAlertLeadChange(leadMinutes)}
+                        className={`rounded-[10px] border px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                          selected
+                            ? "border-[var(--team-accent)] bg-[var(--team-accent)] text-[var(--theme-on-accent)]"
+                            : "border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                        } ${FOCUS_RING}`}
+                      >
+                        {leadMinutes ? `${leadMinutes}m` : "Off"}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                  {notificationPermission === "denied"
+                    ? "Browser notifications are blocked for this site. Re-enable them in site settings to arm a reminder."
+                    : notificationPermission === "unsupported"
+                      ? "This browser does not support local notifications. Use a calendar link for a reliable reminder."
+                      : reminderArmed
+                        ? `Armed for ${nextSession.sessionName}. Keep this dashboard open; use a calendar link when you will be away.`
+                        : "Choose a lead time to request browser permission. Calendar links work when this dashboard is closed."}
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                A reminder can be armed when the schedule feed publishes the next session.
+              </div>
+            )}
+          </div>
+
+          <div className="minimal-card rounded-[20px] p-4 sm:rounded-[22px]">
+            <div className="eyebrow">Data scope</div>
             <div className="section-title mt-2 text-base font-semibold">
-              {dashboard.trackMap.circuitName}
+              Session boundaries
             </div>
             <div className="mt-3 grid gap-2">
-              <MiniStat icon={<MapIcon size={14} />} label="Layout" value={dashboard.trackMap.layoutKey} />
-              <MiniStat icon={<Users size={14} />} label="Cars mapped" value={`${dashboard.trackMap.cars.length}`} />
+              <MiniStat
+                icon={<Flag size={14} />}
+                label="Next weekend"
+                value={nextSession?.circuitName ?? "Awaiting schedule"}
+              />
+              <MiniStat
+                icon={<MapIcon size={14} />}
+                label="Replay archive"
+                value={dashboard.trackMap.circuitName}
+              />
               <MiniStat
                 icon={<Radio size={14} />}
                 label="Telemetry"
@@ -4751,13 +4847,20 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const telemetryReplaySpeed = normalizeTelemetryReplaySpeed(
     ui.telemetryReplaySpeed,
   );
+  const sessionAlertLeadMinutes = normalizeSessionAlertLeadMinutes(
+    ui.sessionAlertLeadMinutes,
+  );
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    "default" | "granted" | "denied" | "unsupported"
+  >("default");
   const scrubFrameRef = useRef<number | null>(null);
   const lastPlayFrameRef = useRef<number | null>(null);
   const replayElapsedRef = useRef(0);
   const replayIndexRef = useRef(0);
+  const deliveredAlertKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -4791,6 +4894,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           scrubIndex?: number;
           isTelemetryPlaying?: boolean;
           telemetryReplaySpeed?: number;
+          sessionAlertLeadMinutes?: number;
           themeMode?: "system" | "light" | "dark";
           visualTheme?: string;
         };
@@ -4812,6 +4916,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 : undefined,
             telemetryReplaySpeed: normalizeTelemetryReplaySpeed(
               parsed.telemetryReplaySpeed,
+            ),
+            sessionAlertLeadMinutes: normalizeSessionAlertLeadMinutes(
+              parsed.sessionAlertLeadMinutes,
             ),
             themeMode: parsed.themeMode,
             visualTheme:
@@ -4882,6 +4989,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           scrubIndex,
           isTelemetryPlaying,
           telemetryReplaySpeed,
+          sessionAlertLeadMinutes,
           themeMode: ui.themeMode,
           visualTheme: ui.visualTheme,
         }),
@@ -4893,12 +5001,92 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     activeTab,
     isTelemetryPlaying,
     prefsLoaded,
+    sessionAlertLeadMinutes,
     scrubIndex,
     selectedDriverId,
     ui.themeMode,
     ui.visualTheme,
     ui.watchlist,
     telemetryReplaySpeed,
+  ]);
+
+  useEffect(() => {
+    const syncNotificationPermission = () => {
+      setNotificationPermission(
+        "Notification" in window ? Notification.permission : "unsupported",
+      );
+    };
+
+    syncNotificationPermission();
+    window.addEventListener("focus", syncNotificationPermission);
+    return () => window.removeEventListener("focus", syncNotificationPermission);
+  }, []);
+
+  useEffect(() => {
+    const session = data.nextSession;
+    if (
+      !prefsLoaded ||
+      !session ||
+      !sessionAlertLeadMinutes ||
+      notificationPermission !== "granted"
+    ) {
+      return;
+    }
+
+    const notifyWhenDue = () => {
+      const startsAt = new Date(session.dateStart).getTime();
+      const now = Date.now();
+      const alertWindowStart = startsAt - sessionAlertLeadMinutes * 60_000;
+      if (now < alertWindowStart || now >= startsAt) {
+        return;
+      }
+
+      const notificationKey = `pphq-session-alert/${session.sessionKey}/${sessionAlertLeadMinutes}`;
+      if (deliveredAlertKeysRef.current.has(notificationKey)) {
+        return;
+      }
+      try {
+        if (window.localStorage.getItem(notificationKey)) {
+          deliveredAlertKeysRef.current.add(notificationKey);
+          return;
+        }
+      } catch {
+        // A notification can still be useful when storage is unavailable.
+      }
+
+      try {
+        const notification = new Notification(
+          `F1 ${session.sessionName} starts in ${sessionAlertLeadMinutes} minutes`,
+          {
+            body: `${session.circuitName} / ${session.location}, ${session.countryName}`,
+            tag: notificationKey,
+          },
+        );
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+        deliveredAlertKeysRef.current.add(notificationKey);
+        logDashboardInteraction("session_alert_fire", String(session.sessionKey));
+      } catch {
+        return;
+      }
+
+      try {
+        window.localStorage.setItem(notificationKey, new Date().toISOString());
+      } catch {
+        // Notification delivery does not depend on preference storage.
+      }
+    };
+
+    notifyWhenDue();
+    const timer = window.setInterval(notifyWhenDue, 30_000);
+    return () => window.clearInterval(timer);
+  }, [
+    data.nextSession,
+    notificationPermission,
+    prefsLoaded,
+    sessionAlertLeadMinutes,
   ]);
 
   useEffect(() => {
@@ -5029,6 +5217,37 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const changeTelemetryReplaySpeed = (speed: TelemetryReplaySpeed) => {
     dispatch(setTelemetryReplaySpeed(speed));
     logDashboardInteraction("telemetry_replay_speed", `${speed}x`);
+  };
+
+  const changeSessionAlert = async (leadMinutes: SessionAlertLeadMinutes) => {
+    if (!leadMinutes) {
+      dispatch(setSessionAlertLeadMinutes(0));
+      logDashboardInteraction("session_alert_change", "off");
+      return;
+    }
+
+    if (!("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+
+    let permission = Notification.permission;
+    if (permission === "default") {
+      try {
+        permission = await Notification.requestPermission();
+      } catch {
+        permission = "denied";
+      }
+    }
+
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      dispatch(setSessionAlertLeadMinutes(leadMinutes));
+      logDashboardInteraction("session_alert_change", `${leadMinutes}m`);
+    } else {
+      dispatch(setSessionAlertLeadMinutes(0));
+      logDashboardInteraction("session_alert_change", "blocked");
+    }
   };
 
   useEffect(() => {
@@ -5368,7 +5587,12 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "weekend" ? (
         <div className="grid gap-4 sm:gap-5">
-          <WeekendInfoPanel dashboard={data} />
+          <WeekendInfoPanel
+            dashboard={data}
+            alertLeadMinutes={sessionAlertLeadMinutes}
+            notificationPermission={notificationPermission}
+            onAlertLeadChange={(leadMinutes) => void changeSessionAlert(leadMinutes)}
+          />
           <NewsroomPanel activity={data.activity} />
         </div>
       ) : null}

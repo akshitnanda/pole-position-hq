@@ -7,6 +7,8 @@ type InteractionName =
   | "telemetry_playback"
   | "telemetry_replay_speed"
   | "team_radio_play"
+  | "session_alert_change"
+  | "session_alert_fire"
   | "fantasy_builder"
   | "share_driver_card"
   | "voice_driver_select"

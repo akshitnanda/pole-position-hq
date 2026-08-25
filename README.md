@@ -12,7 +12,9 @@ Live demo: https://polehq.vercel.app
 - Official F1 Fantasy API integration with graceful fallback heuristics
 - Motorsport.com, The Race, Reddit, and optional X activity feeds
 - Race intelligence workspace for upgrade signals, timing deltas, and source confidence
-- Scrub-linked telemetry and broadcast-style circuit map synchronization
+- Scrub-linked telemetry, 0.5x-16x session replay, and circuit-map synchronization
+- Official OpenF1 team-radio clips with session-scoped driver attribution
+- Opt-in local session reminders plus Google and Apple calendar links
 - Local-only saved preferences for selected driver and watchlist
 - Public-demo resilience with cached snapshots, fallback states, and source badges
 
@@ -117,6 +119,7 @@ Pole Position HQ is optimized as a stable live demo, not a fragile ultra-realtim
 - Race intelligence cards combine activity mentions with OpenF1 timing and standings-derived heuristics
 - Fantasy data falls back gracefully when official endpoints are unavailable
 - The UI explicitly shows whether a section is live, cached, fallback, or empty
+- Local session reminders require the dashboard to remain open; calendar links are the reliable closed-tab option
 
 ## Notes
 
