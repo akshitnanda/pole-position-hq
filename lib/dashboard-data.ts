@@ -1950,7 +1950,9 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   const intervalWindowStart = recentRaceSession
     ? new Date(
-        new Date(recentRaceSession.date_end).getTime() - 40 * 60_000,
+        // The timing tower only consumes the latest interval per running driver.
+        // Eighteen minutes keeps that terminal state below Next's 2 MB cache ceiling.
+        new Date(recentRaceSession.date_end).getTime() - 18 * 60_000,
       ).toISOString()
     : null;
   const teamRadioRowsPromise = recentRaceSession
