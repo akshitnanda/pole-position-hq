@@ -12,11 +12,14 @@ import {
   Clock3,
   Flag,
   Gauge,
+  Headphones,
   Map as MapIcon,
   MessageCircle,
   Minus,
   Newspaper,
   Palette,
+  Pause,
+  Play,
   Share2,
   Mic,
   Radio,
@@ -3230,6 +3233,168 @@ function RaceControlPanel({
   );
 }
 
+function TeamRadioPanel({
+  radio,
+  sourceMeta,
+}: {
+  radio: DashboardData["teamRadio"];
+  sourceMeta: DashboardData["sources"]["teamRadio"];
+}) {
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [failedClipId, setFailedClipId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const sourceTone = getFeedTone(sourceMeta.status);
+  const visibleClips = expanded ? radio.clips : radio.clips.slice(0, 3);
+  const hiddenClipCount = Math.max(radio.clips.length - visibleClips.length, 0);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  const toggleClip = async (clip: DashboardData["teamRadio"]["clips"][number]) => {
+    if (activeClipId === clip.id && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setActiveClipId(null);
+      return;
+    }
+
+    audioRef.current?.pause();
+    const audio = new Audio(clip.recordingUrl);
+    audio.preload = "none";
+    audio.onended = () => {
+      audioRef.current = null;
+      setActiveClipId(null);
+    };
+    audio.onerror = () => {
+      audioRef.current = null;
+      setActiveClipId(null);
+      setFailedClipId(clip.id);
+    };
+    audioRef.current = audio;
+    setActiveClipId(clip.id);
+    setFailedClipId(null);
+    logDashboardInteraction("team_radio_play", clip.driverId ?? clip.driverNumber);
+
+    try {
+      await audio.play();
+    } catch {
+      audioRef.current = null;
+      setActiveClipId(null);
+      setFailedClipId(clip.id);
+    }
+  };
+
+  return (
+    <Panel tint="var(--team-accent-wash)">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Team radio</div>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] ${sourceTone.className}`}
+            >
+              {sourceTone.label}
+            </span>
+          </div>
+          <div className="section-title mt-2 text-base font-semibold sm:text-xl">
+            {radio.session
+              ? `${radio.session.circuitName} radio archive`
+              : "Radio archive unavailable"}
+          </div>
+          <div className="section-copy mt-1 text-[13px]">
+            {radio.session
+              ? `${radio.session.sessionName} / officially released clips only`
+              : "A session key is required before audio can be loaded."}
+          </div>
+        </div>
+        <Headphones size={18} className="mt-1 shrink-0 text-[var(--muted)]" />
+      </div>
+
+      {radio.clips.length ? (
+        <div className="mt-4 grid gap-2 md:grid-cols-3">
+          {visibleClips.map((clip) => {
+            const playing = activeClipId === clip.id;
+            const failed = failedClipId === clip.id;
+            return (
+              <button
+                key={clip.id}
+                type="button"
+                onClick={() => void toggleClip(clip)}
+                aria-label={`${playing ? "Pause" : "Play"} ${clip.driverLabel} team radio`}
+                aria-pressed={playing}
+                className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-left transition hover:-translate-y-px ${FOCUS_RING}`}
+              >
+                <span
+                  className="grid h-9 w-9 place-items-center rounded-full"
+                  style={{
+                    color: `#${clip.teamColor}`,
+                    background: rgba(clip.teamColor, 0.14),
+                  }}
+                >
+                  {playing ? <Pause size={14} /> : <Play size={14} />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-[var(--foreground)]">
+                    {clip.driverLabel}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                    {clip.abbreviation} / {formatTrackDate(clip.recordedAt, radio.session?.gmtOffset ?? "+00:00")}
+                  </span>
+                </span>
+                <span className={`text-[9px] font-semibold uppercase tracking-[0.12em] ${failed ? "text-[#c51b17]" : "text-[var(--muted)]"}`}>
+                  {failed ? "Unavailable" : playing ? "Playing" : "Clip"}
+                </span>
+              </button>
+            );
+          })}
+
+          {radio.clips.length > 3 ? (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => {
+                if (expanded && activeClipId && !radio.clips.slice(0, 3).some((clip) => clip.id === activeClipId)) {
+                  audioRef.current?.pause();
+                  audioRef.current = null;
+                  setActiveClipId(null);
+                }
+                setExpanded((current) => !current);
+              }}
+              className={`flex items-center justify-center gap-2 rounded-[12px] border border-dashed border-[var(--line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition hover:border-[var(--team-accent)] hover:text-[var(--foreground)] md:col-span-3 ${FOCUS_RING}`}
+            >
+              {expanded ? "Show fewer" : `Show ${hiddenClipCount} more`}
+              <ChevronDown
+                size={13}
+                className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-[14px] border border-dashed border-[var(--line)] bg-[var(--surface)] px-4 py-5">
+          <div className="text-sm font-semibold text-[var(--foreground)]">
+            No released radio for this session
+          </div>
+          <div className="mt-1 text-xs leading-5 text-[var(--muted)]">
+            {radio.note}
+          </div>
+        </div>
+      )}
+
+      {radio.clips.length ? (
+        <div className="mt-3 border-t border-[var(--line)] pt-3 text-xs leading-5 text-[var(--muted)]">
+          {radio.note}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
 function DashboardTabs({
   activeTab,
   onChange,
@@ -4280,6 +4445,13 @@ function WeekendInfoPanel({
     dashboard.sources.fantasy,
     dashboard.sources.activity,
     dashboard.sources.raceIntel,
+    dashboard.sources.teamRadio ?? {
+      label: "Team radio",
+      source: "OpenF1 /team_radio",
+      status: "empty" as const,
+      updatedAt: null,
+      note: "Refresh to check official radio coverage for the archived session.",
+    },
   ];
   const nextSession = dashboard.nextSession;
 
@@ -4526,6 +4698,21 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       updatedAt: null,
       note: "Refresh to load two session-matched telemetry traces.",
       traces: [],
+    };
+  const teamRadio: DashboardData["teamRadio"] = data.teamRadio ?? {
+    session: data.telemetrySession,
+    status: "empty",
+    updatedAt: null,
+    note: "Refresh to check whether F1 released official radio clips for this session.",
+    clips: [],
+  };
+  const teamRadioSource: DashboardData["sources"]["teamRadio"] =
+    data.sources.teamRadio ?? {
+      label: "Team radio",
+      source: "OpenF1 /team_radio",
+      status: "empty",
+      updatedAt: null,
+      note: teamRadio.note,
     };
   const refetch = () => query.refetch().unwrap();
   const isFetching = query.isFetching;
@@ -5064,7 +5251,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "live" ? (
         <div className="grid gap-4 sm:gap-5">
-          <div className="order-2 md:order-1">
+          <div className="order-2 min-w-0 md:order-1">
             <HeaderHero
               dashboard={data}
               selectedDriver={selectedDriver}
@@ -5073,13 +5260,16 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             />
           </div>
 
-          <div className="order-3 md:order-2">
+          <div className="order-3 grid min-w-0 gap-4 sm:gap-5 md:order-2">
             <WidgetBoundary label="Race control">
               <RaceControlPanel raceControl={data.raceControl} initialNow={snapshotNow} />
             </WidgetBoundary>
+            <WidgetBoundary label="Team radio">
+              <TeamRadioPanel radio={teamRadio} sourceMeta={teamRadioSource} />
+            </WidgetBoundary>
           </div>
 
-          <div className="order-1 md:order-3">
+          <div className="order-1 min-w-0 md:order-3">
             <WidgetBoundary label="Live timing">
               <TimingBoardPanel
                 timing={timingTower}
@@ -5089,7 +5279,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             </WidgetBoundary>
           </div>
 
-          <div className="order-4 grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(420px,1.15fr)]">
+          <div className="order-4 grid min-w-0 gap-4 sm:gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(420px,1.15fr)]">
             <BriefingPanel
               dashboard={data}
               selectedDriver={selectedDriver}

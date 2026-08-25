@@ -173,6 +173,17 @@ export type RaceControlState = {
   events: RaceControlEvent[];
 };
 
+export type TeamRadioClip = {
+  id: string;
+  driverId: string | null;
+  driverNumber: string;
+  driverLabel: string;
+  abbreviation: string;
+  teamColor: string;
+  recordedAt: string;
+  recordingUrl: string;
+};
+
 export type SessionWeather = {
   sessionKey: number;
   label: string;
@@ -309,6 +320,7 @@ export type DashboardData = {
     fantasy: DashboardFeedMeta;
     activity: DashboardFeedMeta;
     raceIntel: DashboardFeedMeta;
+    teamRadio: DashboardFeedMeta;
   };
   activity: {
     items: ActivityItem[];
@@ -316,6 +328,13 @@ export type DashboardData = {
   };
   raceIntelligence: RaceIntelligence;
   raceControl: RaceControlState;
+  teamRadio: {
+    session: SessionSummary | null;
+    status: DataFeedStatus;
+    updatedAt: string | null;
+    note: string;
+    clips: TeamRadioClip[];
+  };
   weekendWeather: SessionWeather[];
   liveTiming: LiveTimingState;
   fantasy: {

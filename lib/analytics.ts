@@ -6,6 +6,7 @@ type InteractionName =
   | "telemetry_scrub"
   | "telemetry_playback"
   | "telemetry_replay_speed"
+  | "team_radio_play"
   | "fantasy_builder"
   | "share_driver_card"
   | "voice_driver_select"
