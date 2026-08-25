@@ -944,20 +944,6 @@ function useTelemetryWorker(samples: DashboardData["telemetrySamples"]) {
   return metrics;
 }
 
-function buildRadioSnippet(driver: DriverInsight | null) {
-  if (!driver) {
-    return "Awaiting driver channel.";
-  }
-
-  const templates = [
-    `${driver.abbreviation}: balance is coming alive through sector two.`,
-    `${driver.abbreviation}: copy, tyre phase looks stable.`,
-    `${driver.abbreviation}: push window available after the next split.`,
-  ];
-
-  return templates[driver.standingPosition % templates.length];
-}
-
 function buildCalendarLinks(session: SessionSummary) {
   const start = new Date(session.dateStart);
   const end = new Date(session.dateEnd);
@@ -2400,6 +2386,7 @@ function LiveActionDock({
   insights,
   liveTiming,
   telemetrySamples,
+  teamRadio,
   scrubIndex,
   drivers,
   selectedDriverId,
@@ -2413,6 +2400,7 @@ function LiveActionDock({
   insights: DashboardData["telemetryInsights"];
   liveTiming: DashboardData["liveTiming"];
   telemetrySamples: DashboardData["telemetrySamples"];
+  teamRadio: DashboardData["teamRadio"];
   scrubIndex: number;
   drivers: DriverInsight[];
   selectedDriverId: string;
@@ -2421,6 +2409,13 @@ function LiveActionDock({
 }) {
   const pathRef = useRef<SVGPathElement | null>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const selectedDriverRadioClips = selectedDriver
+    ? teamRadio.clips.filter(
+        (clip) =>
+          clip.driverId === selectedDriver.id ||
+          clip.driverNumber === selectedDriver.sessionDriverNumber,
+      )
+    : [];
   const layout = getTrackLayout(layoutKey, circuitName);
   const activeSample =
     telemetrySamples[clampIndex(scrubIndex, Math.max(1, telemetrySamples.length))] ?? null;
@@ -2782,8 +2777,12 @@ function LiveActionDock({
                 </span>
               </div>
               <div className="mt-1 flex items-start gap-2 text-xs text-[var(--muted)]">
-                <MessageCircle size={14} className="mt-0.5 shrink-0" />
-                <span className="line-clamp-2">{buildRadioSnippet(selectedDriver)}</span>
+                <Headphones size={14} className="mt-0.5 shrink-0" />
+                <span className="line-clamp-2">
+                  {selectedDriverRadioClips.length
+                    ? `${selectedDriverRadioClips.length} official ${teamRadio.session?.circuitName ?? "session"} archive ${selectedDriverRadioClips.length === 1 ? "clip" : "clips"} in Team Radio.`
+                    : `No official radio clip released for this driver in the ${teamRadio.session?.circuitName ?? "session"} archive.`}
+                </span>
               </div>
             </div>
           </div>
@@ -5513,6 +5512,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 insights={data.telemetryInsights}
                 liveTiming={data.liveTiming}
                 telemetrySamples={data.telemetrySamples}
+                teamRadio={teamRadio}
                 scrubIndex={effectiveScrubIndex}
                 drivers={data.standings}
                 selectedDriverId={effectiveSelectedDriverId}
