@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Pole Position HQ",
     description:
-      "A polished F1 command center with telemetry, timing context, news activity, race intelligence, and fantasy signals.",
+      "A polished F1 command center with telemetry, timing context, news activity, race intelligence, and a fantasy sandbox.",
     images: ["/twitter-image"],
   },
 };

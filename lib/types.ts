@@ -113,7 +113,7 @@ export type ActivityItem = {
   publishedAt: string | null;
   summary: string;
   category: "breaking" | "upgrade" | "timing" | "strategy" | "community" | "business";
-  signalScore: number;
+  priorityScore: number;
   engagementLabel: string;
   tags: string[];
 };
@@ -132,8 +132,9 @@ export type UpgradeSignal = {
   teamName: string;
   teamColor: string;
   package: string;
-  impact: "high" | "medium" | "low";
-  confidence: number;
+  evidenceLevel: "high" | "medium" | "low";
+  mentionCount: number;
+  sourceCount: number;
   evidence: string;
   relatedItemIds: string[];
 };
