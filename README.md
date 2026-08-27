@@ -1,6 +1,6 @@
 # Pole Position HQ
 
-Pole Position HQ is a premium Formula 1 command center built with Next.js App Router, Tailwind CSS, and TanStack Query. It combines real race schedule data, standings, fantasy signals, and scrub-linked telemetry into a polished public demo surface that feels closer to a pit wall broadcast than a typical stats page.
+Pole Position HQ is a premium Formula 1 command center built with Next.js App Router, Tailwind CSS, and TanStack Query. It combines real race schedule data, standings, a clearly labeled fantasy sandbox, and scrub-linked telemetry into a polished public demo surface that feels closer to a pit wall broadcast than a typical stats page.
 
 Live demo: https://polehq.vercel.app
 
@@ -11,7 +11,7 @@ Live demo: https://polehq.vercel.app
 - F1 GraphQL standings enrichment for driver context and historical stats
 - Official F1 Fantasy API integration with graceful fallback heuristics
 - Motorsport.com, The Race, Reddit, and optional X activity feeds
-- Race intelligence workspace for upgrade signals, timing deltas, and source confidence
+- Race intelligence workspace for sourced upgrade mentions, evidence strength, and timing deltas
 - Scrub-linked telemetry, 0.5x-16x session replay, and circuit-map synchronization
 - Official OpenF1 team-radio clips with session-scoped driver attribution
 - Opt-in local session reminders plus Google and Apple calendar links
@@ -116,7 +116,7 @@ Pole Position HQ is optimized as a stable live demo, not a fragile ultra-realtim
 - Client refreshes happen on an interval and when visibility returns
 - Telemetry and schedule data are short-cache snapshots
 - Newsroom activity uses public editorial/community feeds, with X enabled only when a bearer token is configured
-- Race intelligence cards combine activity mentions with OpenF1 timing and standings-derived heuristics
+- Race intelligence keeps sourced upgrade mentions separate from OpenF1 timing-derived pace context
 - Fantasy data falls back gracefully when official endpoints are unavailable
 - The UI explicitly shows whether a section is live, cached, fallback, or empty
 - Local session reminders require the dashboard to remain open; calendar links are the reliable closed-tab option

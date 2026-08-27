@@ -411,8 +411,16 @@ function normalizeUrl(value: unknown, baseUrl: string): string {
 
 function classifyActivity(text: string): ActivityItem["category"] {
   const normalized = text.toLowerCase();
+  const namesDevelopment =
+    /\b(upgrade|upgraded|update|updated|new|revised|redesigned|development|introduce|introduced|introducing|debut|specification)\b/.test(
+      normalized,
+    );
+  const namesComponent =
+    /\b(floor|front wing|rear wing|sidepod|aero|aerodynamic|package|spec)\b/.test(
+      normalized,
+    );
 
-  if (/\b(upgrade|floor|wing|sidepod|package|aero|technical|spec)\b/.test(normalized)) {
+  if (/\b(upgrade|upgraded)\b/.test(normalized) || (namesDevelopment && namesComponent)) {
     return "upgrade";
   }
 
@@ -467,7 +475,7 @@ function buildActivityTags(text: string, drivers: DriverInsight[]) {
   return Array.from(tags).slice(0, 4);
 }
 
-function scoreActivity(
+function scoreActivityPriority(
   title: string,
   summary: string,
   publishedAt: string | null,
@@ -520,7 +528,7 @@ function dedupeActivityItems(items: ActivityItem[]) {
     .sort((a, b) => {
       const dateA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
       const dateB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-      return b.signalScore - a.signalScore || dateB - dateA;
+      return b.priorityScore - a.priorityScore || dateB - dateA;
     });
 }
 
@@ -562,7 +570,7 @@ function normalizeRssItems(
     const url = normalizeUrl(rawLink ?? entry.guid, baseUrl);
     const publishedAt = String(entry.pubDate ?? entry.published ?? entry.updated ?? "") || null;
     const normalizedDate = publishedAt ? new Date(publishedAt).toISOString() : null;
-    const signalScore = scoreActivity(title, summary, normalizedDate);
+    const priorityScore = scoreActivityPriority(title, summary, normalizedDate);
 
     return {
       id: `${source}-${index}-${Buffer.from(url).toString("base64url").slice(0, 8)}`,
@@ -573,7 +581,7 @@ function normalizeRssItems(
       publishedAt: normalizedDate,
       summary,
       category: classifyActivity(`${title} ${summary}`),
-      signalScore,
+      priorityScore,
       engagementLabel: engagementLabel(0),
       tags: buildActivityTags(`${title} ${summary}`, drivers),
     };
@@ -603,7 +611,7 @@ function normalizeTheRaceHtml(payload: string, drivers: DriverInsight[]): Activi
       publishedAt: null,
       summary,
       category: classifyActivity(title),
-      signalScore: scoreActivity(title, summary, null),
+      priorityScore: scoreActivityPriority(title, summary, null),
       engagementLabel: "scan",
       tags: buildActivityTags(title, drivers),
     };
@@ -690,7 +698,7 @@ async function fetchRedditActivity(drivers: DriverInsight[]) {
         publishedAt,
         summary,
         category: "community",
-        signalScore: scoreActivity(post.title, summary, publishedAt, engagement),
+        priorityScore: scoreActivityPriority(post.title, summary, publishedAt, engagement),
         engagementLabel: engagementLabel(engagement),
         tags: [
           ...(post.link_flair_text ? [post.link_flair_text] : []),
@@ -787,7 +795,7 @@ async function fetchXActivity(drivers: DriverInsight[], raceLabel: string) {
         publishedAt: post.created_at ?? null,
         summary: stripMarkup(post.text).slice(0, 220),
         category: classifyActivity(post.text),
-        signalScore: scoreActivity(post.text, "", post.created_at ?? null, engagement),
+        priorityScore: scoreActivityPriority(post.text, "", post.created_at ?? null, engagement),
         engagementLabel: engagementLabel(engagement),
         tags: buildActivityTags(post.text, drivers),
       };
@@ -1777,13 +1785,13 @@ function buildUpgradeSignals(
       return [];
     }
 
-    const confidence = Math.min(
-      94,
-      58 +
-        related.reduce((sum, item) => sum + item.signalScore, 0) /
-          related.length /
-          2,
-    );
+    const sourceCount = new Set(related.map((item) => item.source)).size;
+    const evidenceLevel =
+      sourceCount >= 3
+        ? "high"
+        : sourceCount >= 2 || related.length >= 3
+          ? "medium"
+          : "low";
     const namedPackage = related[0].title.match(
       /\b(floor|wing|sidepod|aero|package|upgrade)\b/i,
     )?.[0];
@@ -1793,8 +1801,9 @@ function buildUpgradeSignals(
       teamName: team.teamName,
       teamColor: team.teamColor,
       package: namedPackage ? `${namedPackage} mention` : "Upgrade mention",
-      impact: confidence >= 76 ? "high" : confidence >= 58 ? "medium" : "low",
-      confidence: Math.round(confidence),
+      evidenceLevel,
+      mentionCount: related.length,
+      sourceCount,
       evidence: related[0].summary || related[0].title,
       relatedItemIds: related.slice(0, 3).map((item) => item.id),
     };
@@ -1856,7 +1865,7 @@ function buildRaceIntelligence(
   return {
     raceLabel,
     headline: leadSignal
-      ? `${leadSignal.teamName} ${leadSignal.package.toLowerCase()} leads the upgrade board`
+      ? `${leadSignal.teamName} leads sourced upgrade coverage`
       : hotTiming
         ? `${hotTiming.driverLabel} anchors the current timing read`
         : `${raceLabel} intelligence is building from the live feed`,
@@ -2257,7 +2266,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       },
       raceIntel: {
         label: "Race intel",
-        source: "Verified activity mentions + OpenF1 lap data",
+        source: "Sourced activity mentions + OpenF1 lap data",
         status: raceIntelligence.timingDeltas.length || raceIntelligence.upgradeSignals.length
           ? "cached"
           : "empty",

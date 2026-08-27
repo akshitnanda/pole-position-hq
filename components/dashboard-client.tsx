@@ -878,12 +878,12 @@ function getCategoryTone(category: DashboardData["activity"]["items"][number]["c
   return { label: "Community", className: "bg-black/5 text-[var(--muted)] border-black/10" };
 }
 
-function getImpactTone(impact: DashboardData["raceIntelligence"]["upgradeSignals"][number]["impact"]) {
-  if (impact === "high") {
+function getEvidenceTone(level: DashboardData["raceIntelligence"]["upgradeSignals"][number]["evidenceLevel"]) {
+  if (level === "high") {
     return "bg-[#e10600]/10 text-[#c40000] border-[#e10600]/20";
   }
 
-  if (impact === "medium") {
+  if (level === "medium") {
     return "bg-[#d5a125]/12 text-[#8c6500] border-[#d5a125]/24";
   }
 
@@ -1213,7 +1213,7 @@ function BriefingPanel({
         </div>
         <div className="grid grid-cols-3 gap-1.5">
           <span className="glass-pill telemetry-text rounded-full px-2.5 py-1.5 text-center text-[10px] font-semibold text-[var(--foreground)]">
-            {dashboard.activity.items.length} signals
+            {dashboard.activity.items.length} items
           </span>
           <span className="glass-pill telemetry-text rounded-full px-2.5 py-1.5 text-center text-[10px] font-semibold text-[var(--foreground)]">
             {sourceCount} feeds
@@ -1229,14 +1229,14 @@ function BriefingPanel({
           icon={<Newspaper size={16} />}
           eyebrow="News pulse"
           title={topActivity?.title ?? "Activity feeds are standing by"}
-          meta={topActivity ? `${topActivity.sourceLabel} / ${topActivity.signalScore} signal` : "No readable feed item yet"}
+          meta={topActivity ? `${topActivity.sourceLabel} / ${formatActivityTime(topActivity.publishedAt)}` : "No readable feed item yet"}
           onClick={() => onNavigate("weekend")}
         />
         <BriefingAction
           icon={<Wrench size={16} />}
           eyebrow="Upgrade watch"
           title={topUpgrade ? `${topUpgrade.teamName}: ${topUpgrade.package}` : "No sourced upgrade signal"}
-          meta={topUpgrade ? `${topUpgrade.impact} impact / ${topUpgrade.confidence}% confidence` : "Editorial evidence required"}
+          meta={topUpgrade ? `${topUpgrade.evidenceLevel} evidence / ${topUpgrade.mentionCount} sourced ${topUpgrade.mentionCount === 1 ? "mention" : "mentions"}` : "Editorial evidence required"}
           accent={topUpgrade?.teamColor}
           onClick={() => onNavigate("analysis")}
         />
@@ -4160,7 +4160,7 @@ function NewsroomPanel({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="eyebrow">Newsroom</div>
-            <FunBadge label={`${activity.items.length} signals`} tone="accent" />
+            <FunBadge label={`${activity.items.length} items`} tone="accent" />
           </div>
           <div className="section-title mt-2 text-xl font-semibold sm:text-[1.8rem]">
             Activity around the paddock
@@ -4168,11 +4168,14 @@ function NewsroomPanel({
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
             Motorsport.com, The Race, Reddit, and X folded into one source-aware activity board.
           </div>
+          <div className="mt-2 max-w-3xl text-xs leading-5 text-[var(--muted)]">
+            Ordered by recency, explicit race terms, and observed engagement. This is a relevance queue, not a probability.
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatChip label="Sources" value={`${activity.sourcePulse.length}`} />
           <StatChip label="Live" value={`${liveSources}`} />
-          <StatChip label="Top signal" value={leadItem ? `${leadItem.signalScore}` : "--"} />
+          <StatChip label="Latest" value={leadItem ? formatActivityTime(leadItem.publishedAt) : "--"} />
         </div>
       </div>
 
@@ -4187,9 +4190,6 @@ function NewsroomPanel({
             >
               <div className="absolute inset-x-0 top-0 h-1 bg-[var(--team-accent)]" />
               <div className="absolute right-3 top-3 flex items-center gap-2">
-                <span className="telemetry-text rounded-full border border-white/60 bg-white/82 px-2.5 py-1 text-[10px] font-semibold text-[var(--foreground)] shadow-sm">
-                  {leadItem.signalScore}
-                </span>
                 <span className="rounded-full border border-white/60 bg-white/82 p-2 shadow-sm">
                   <ArrowUpRight size={14} />
                 </span>
@@ -4248,8 +4248,8 @@ function NewsroomPanel({
                         {item.sourceLabel}
                       </span>
                     </div>
-                    <span className="telemetry-text rounded-full bg-black/5 px-2 py-1 text-[10px] font-semibold">
-                      {item.signalScore}
+                    <span className="telemetry-text text-[10px] font-semibold text-[var(--muted)]">
+                      {formatActivityTime(item.publishedAt)}
                     </span>
                   </div>
                   <div className="mt-3 line-clamp-3 text-sm font-semibold leading-5 text-[var(--foreground)]">
@@ -4328,15 +4328,18 @@ function RaceIntelPanel({
             {intel.headline}
           </div>
           <div className="section-copy mt-1 text-[13px] sm:text-sm">
-            Verified upgrade mentions stay separate from timing-derived pace so evidence and inference never blur.
+            Sourced upgrade mentions stay separate from timing-derived pace so evidence and inference never blur.
+          </div>
+          <div className="mt-2 max-w-3xl text-xs leading-5 text-[var(--muted)]">
+            Evidence strength reflects independent source coverage, not modeled confidence.
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <StatChip label="Upgrades" value={`${intel.upgradeSignals.length}`} />
           <StatChip label="Timing" value={`${intel.timingDeltas.length}`} />
           <StatChip
-            label="Confidence"
-            value={intel.upgradeSignals[0] ? `${intel.upgradeSignals[0].confidence}%` : "--"}
+            label="Mentions"
+            value={`${intel.upgradeSignals.reduce((sum, signal) => sum + signal.mentionCount, 0)}`}
             accent={intel.upgradeSignals[0]?.teamColor}
           />
         </div>
@@ -4350,20 +4353,9 @@ function RaceIntelPanel({
               className="minimal-card team-tint relative overflow-hidden rounded-[20px] p-4 sm:rounded-[22px]"
               style={{ ["--team-tint" as string]: rgba(signal.teamColor, 0.1) }}
             >
-              <div className="absolute right-3 top-3 flex items-center gap-2">
-                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${getImpactTone(signal.impact)}`}>
-                  {signal.impact}
-                </span>
-                <span
-                  className="telemetry-text rounded-full px-2.5 py-1 text-[10px] font-semibold"
-                  style={{ background: rgba(signal.teamColor, 0.13), color: `#${signal.teamColor}` }}
-                >
-                  {signal.confidence}%
-                </span>
-              </div>
-              <div className="pr-24">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-[12px] bg-white/72 p-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 rounded-[12px] bg-white/72 p-2">
                     <Wrench size={15} />
                   </span>
                   <div className="min-w-0">
@@ -4373,9 +4365,17 @@ function RaceIntelPanel({
                     <div className="text-xs text-[var(--muted)]">{signal.package}</div>
                   </div>
                 </div>
-                <div className="mt-4 text-sm leading-6 text-[var(--muted)]">
-                  {signal.evidence}
-                </div>
+                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${getEvidenceTone(signal.evidenceLevel)}`}>
+                  {signal.evidenceLevel} evidence
+                </span>
+              </div>
+              <div className="mt-4 text-sm leading-6 text-[var(--muted)]">
+                {signal.evidence}
+              </div>
+              <div className="telemetry-text mt-4 flex items-center gap-2 border-t border-black/6 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+                <span>{signal.mentionCount} {signal.mentionCount === 1 ? "mention" : "mentions"}</span>
+                <span aria-hidden="true">/</span>
+                <span>{signal.sourceCount} {signal.sourceCount === 1 ? "source" : "sources"}</span>
               </div>
             </div>
           )) : (
