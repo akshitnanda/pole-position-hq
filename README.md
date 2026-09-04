@@ -74,7 +74,7 @@ All environment variables are optional in v1.
 - `NVIDIA_NIM_BASE_URL`
   OpenAI-compatible NIM base URL. Defaults to NVIDIA's hosted API and can point to a self-hosted deployment.
 - `NVIDIA_NIM_MODEL`
-  NIM model identifier. Defaults to `nvidia/llama-3.3-nemotron-super-49b-v1`.
+  NIM model identifier. Defaults to `nvidia/nemotron-3.5-lightning-30b-a3b`.
 
 ## Quality checks
 

@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
-const DEFAULT_MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1";
+const DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const MAX_REQUEST_BYTES = 24_000;
 
 type BriefRequest = {
@@ -262,7 +262,9 @@ export async function POST(request: Request) {
         ],
         temperature: 0.2,
         top_p: 0.7,
-        max_tokens: 850,
+        max_tokens: 1_200,
+        chat_template_kwargs: { enable_thinking: false },
+        reasoning_budget: 0,
         stream: false,
       }),
       cache: "no-store",
