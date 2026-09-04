@@ -12,6 +12,7 @@ Live demo: https://polehq.vercel.app
 - Official F1 Fantasy API integration with graceful fallback heuristics
 - Motorsport.com, The Race, Reddit, and optional X activity feeds
 - Race intelligence workspace for sourced upgrade mentions, evidence strength, and timing deltas
+- NVIDIA NIM-powered Pit Wall AI briefs with evidence references and server-side credentials
 - Scrub-linked telemetry, 0.5x-16x session replay, and circuit-map synchronization
 - Official OpenF1 team-radio clips with session-scoped driver attribution
 - Opt-in local session reminders plus Google and Apple calendar links
@@ -68,6 +69,12 @@ All environment variables are optional in v1.
   Override for The Race activity source. Defaults to the public Formula 1 category page and normalizes readable article links when an RSS feed is not exposed.
 - `X_BEARER_TOKEN`
   Optional X API bearer token for recent-search activity around F1 race, upgrade, and timing terms.
+- `NVIDIA_API_KEY`
+  Server-only credential for NVIDIA's hosted NIM API. Never expose this with a `NEXT_PUBLIC_` prefix.
+- `NVIDIA_NIM_BASE_URL`
+  OpenAI-compatible NIM base URL. Defaults to NVIDIA's hosted API and can point to a self-hosted deployment.
+- `NVIDIA_NIM_MODEL`
+  NIM model identifier. Defaults to `nvidia/nemotron-3.5-lightning-30b-a3b`.
 
 ## Quality checks
 
@@ -117,6 +124,7 @@ Pole Position HQ is optimized as a stable live demo, not a fragile ultra-realtim
 - Telemetry and schedule data are short-cache snapshots
 - Newsroom activity uses public editorial/community feeds, with X enabled only when a bearer token is configured
 - Race intelligence keeps sourced upgrade mentions separate from OpenF1 timing-derived pace context
+- Pit Wall AI runs only on demand, sends a compact evidence ledger through a server route, and rejects findings without valid dashboard evidence references
 - Fantasy data falls back gracefully when official endpoints are unavailable
 - The UI explicitly shows whether a section is live, cached, fallback, or empty
 - Local session reminders require the dashboard to remain open; calendar links are the reliable closed-tab option
