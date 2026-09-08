@@ -69,6 +69,7 @@ import {
   type TelemetryReplaySpeed,
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
+import { PitWallAiPanel } from "@/components/pit-wall-ai";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
@@ -5528,6 +5529,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
 
       {activeTab === "analysis" ? (
         <div className="grid gap-4 sm:gap-5">
+          <WidgetBoundary label="Pit Wall AI">
+            <PitWallAiPanel dashboard={data} selectedDriver={selectedDriver} />
+          </WidgetBoundary>
           <WidgetBoundary label="Strategy replay">
             <StrategyPanel
               strategy={strategy}
