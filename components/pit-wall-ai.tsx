@@ -1,279 +1,210 @@
 "use client";
 
-import { BrainCircuit, CheckCircle2, Gauge, LoaderCircle, ShieldCheck, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import {
-  buildPitWallEvidence,
-  type PitWallBrief,
-  type PitWallMode,
-} from "@/lib/pit-wall-ai";
+import { Check, Copy, Download, LoaderCircle, Search, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { buildPitWallEvidence, type PitWallBrief, type PitWallEvidence, type PitWallMode } from "@/lib/pit-wall-ai";
+import { buildSnapshotBrief, scopePitWallEvidence } from "@/lib/pit-wall-selection";
+import { buildBriefText, type BriefRecord } from "@/lib/pit-wall-export";
+import { briefTextParts, formatBriefDate } from "@/lib/pit-wall-presentation";
 import type { DashboardData, DriverInsight } from "@/lib/types";
+import styles from "./pit-wall-ai.module.css";
 
-const MODES: Array<{ id: PitWallMode; label: string; detail: string }> = [
-  { id: "race-brief", label: "Race brief", detail: "Priority read" },
-  { id: "driver-focus", label: "Driver focus", detail: "Selected driver" },
-  { id: "weekend-outlook", label: "Weekend outlook", detail: "Schedule + weather" },
+const MODES: Array<{ id: PitWallMode; label: string }> = [
+  { id: "race-brief", label: "Race brief" },
+  { id: "driver-focus", label: "Driver focus" },
+  { id: "weekend-outlook", label: "Weekend outlook" },
 ];
+type NimStatus = { enabled: boolean; model: string; requestTimeoutMs: number };
 
-type NimStatus = {
-  enabled: boolean;
-  model: string;
-  provider: string;
-  deployment: string;
-};
-
-type ErrorPayload = {
-  message?: string;
-};
-
-function shortModelName(model: string) {
-  return model.split("/").pop()?.replace(/-/g, " ") ?? model;
+function ReadableText({ value, timeZone }: { value: string; timeZone: string }) {
+  return briefTextParts(value, timeZone).map((part, index) => part.dateTime
+    ? <time key={index} dateTime={part.dateTime} title={part.dateTime}>{part.text}</time>
+    : <span key={index}>{part.text}</span>);
 }
 
-export function PitWallAiPanel({
-  dashboard,
-  selectedDriver,
-}: {
-  dashboard: DashboardData;
-  selectedDriver: DriverInsight | null;
+function Receipt({ item }: { item: PitWallEvidence }) {
+  return <details className={styles.receipt}>
+    <summary>View source <span>{item.ref}</span></summary>
+    <div><strong>{item.source}</strong><p>{item.context ?? "Context unavailable"}</p><p>{item.fact}</p></div>
+  </details>;
+}
+
+export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
+  dashboard: DashboardData; selectedDriver: DriverInsight | null; onSelectDriver: (driverId: string) => void;
 }) {
   const [mode, setMode] = useState<PitWallMode>("race-brief");
   const [status, setStatus] = useState<NimStatus | null>(null);
-  const [brief, setBrief] = useState<PitWallBrief | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const evidence = useMemo(
-    () => buildPitWallEvidence(dashboard, selectedDriver),
-    [dashboard, selectedDriver],
-  );
-  const evidenceByRef = useMemo(
-    () => new Map(evidence.map((item) => [item.ref, item])),
-    [evidence],
-  );
+  const [statusError, setStatusError] = useState(false);
+  const [records, setRecords] = useState<Partial<Record<PitWallMode, BriefRecord>>>({});
+  const [loadingMode, setLoadingMode] = useState<PitWallMode | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [errors, setErrors] = useState<Partial<Record<PitWallMode, string>>>({});
+  const [copyState, setCopyState] = useState("idle");
+  const [query, setQuery] = useState("");
+  const [{ zone: timeZone, local: localTime }, setTimeDisplay] = useState({ zone: "UTC", local: false });
+  const [evidenceKind, setEvidenceKind] = useState("all");
+  const request = useRef<AbortController | null>(null);
+  const evidence = useMemo(() => buildPitWallEvidence(dashboard, selectedDriver), [dashboard, selectedDriver]);
+  const scoped = useMemo(() => scopePitWallEvidence(evidence, mode), [evidence, mode]);
+  const snapshot = useMemo(() => buildSnapshotBrief(scoped, mode, dashboard.generatedAt), [scoped, mode, dashboard.generatedAt]);
+  const record = records[mode] ?? (snapshot ? { brief: snapshot, evidence: scoped } : null);
+  const brief = record?.brief;
+  const current = !record || (record.brief.snapshotGeneratedAt === dashboard.generatedAt
+    && JSON.stringify(record.evidence) === JSON.stringify(scoped));
+  const receipts = record?.evidence ?? scoped;
+  const byRef = new Map(receipts.map((item) => [item.ref, item]));
+  const visibleEvidence = receipts.filter((item) => (evidenceKind === "all" || item.kind === evidenceKind) &&
+    `${item.label} ${item.kind} ${item.fact} ${item.context ?? ""} ${item.source}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   useEffect(() => {
+    let active = true;
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
     void fetch("/api/ai-brief", { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("NIM status is unavailable.");
-        }
-        return (await response.json()) as NimStatus;
-      })
-      .then(setStatus)
-      .catch((reason: unknown) => {
-        if (!(reason instanceof Error && reason.name === "AbortError")) {
-          setError("NIM status is unavailable.");
-        }
-      });
-
-    return () => controller.abort();
+        if (!response.ok) throw new Error("Status unavailable");
+        const nextStatus = await response.json() as NimStatus;
+        if (active) { setStatus(nextStatus); setStatusError(false); }
+      }).catch(() => { if (active) setStatusError(true); }).finally(() => window.clearTimeout(timeout));
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout); request.current?.abort(); };
   }, []);
 
-  const generateBrief = async () => {
-    setIsLoading(true);
-    setError(null);
+  useEffect(() => {
+    if (!loadingMode) return;
+    const started = Date.now();
+    const interval = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(interval);
+  }, [loadingMode]);
 
+  async function refine() {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    const requestMode = mode;
+    const submittedEvidence = scoped;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); },
+      Math.min(status?.requestTimeoutMs ?? 45_000, 45_000) + 5_000);
+    setLoadingMode(requestMode);
+    setElapsed(0);
+    setErrors((previous) => ({ ...previous, [requestMode]: undefined }));
     try {
       const response = await fetch("/api/ai-brief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          snapshotGeneratedAt: dashboard.generatedAt,
-          evidence,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ mode: requestMode, snapshotGeneratedAt: dashboard.generatedAt, evidence: submittedEvidence }),
       });
-      const payload = (await response.json()) as PitWallBrief | ErrorPayload;
-
-      if (!response.ok) {
-        throw new Error(
-          "message" in payload && payload.message
-            ? payload.message
-            : "Pit Wall AI could not build this brief.",
-        );
-      }
-
-      setBrief(payload as PitWallBrief);
+      const payload = await response.json() as PitWallBrief & { message?: string };
+      if (!response.ok) throw new Error(payload.message ?? "NVIDIA could not refine this brief.");
+      if (controller.signal.aborted) return;
+      setRecords((previous) => ({ ...previous, [requestMode]: { brief: payload, evidence: submittedEvidence } }));
+      setCopyState("idle");
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Pit Wall AI could not build this brief.",
-      );
+      const message = controller.signal.aborted
+        ? timedOut ? "NVIDIA took too long. Your existing brief is still available." : "Refinement cancelled. Your existing brief is unchanged."
+        : `${reason instanceof Error ? reason.message : "NVIDIA is unavailable."} Your existing brief is unchanged.`;
+      setErrors((previous) => ({ ...previous, [requestMode]: message }));
     } finally {
-      setIsLoading(false);
+      window.clearTimeout(timeout);
+      request.current = null;
+      setLoadingMode(null);
     }
-  };
+  }
 
-  return (
-    <section className="glass-panel carbon-accent relative overflow-hidden rounded-[14px] p-3.5 sm:p-5">
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[var(--team-accent)] via-[#76b900] to-transparent" />
-      <div className="relative grid gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
-        <div className="flex min-w-0 flex-col">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="eyebrow">Pit Wall AI</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#76b900]/25 bg-[#76b900]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#4f7d00]">
-              <Sparkles size={11} /> NVIDIA NIM
-            </span>
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${status?.enabled ? "border-[#00a76f]/20 bg-[#00a76f]/10 text-[#007a55]" : "border-black/8 bg-black/5 text-[var(--muted)]"}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${status?.enabled ? "bg-[#00a76f]" : "bg-[var(--muted)]"}`} />
-              {status?.enabled ? "Ready" : status ? "Setup needed" : "Checking"}
-            </span>
-          </div>
+  async function copyBrief() {
+    if (!record) return;
+    try { await navigator.clipboard.writeText(buildBriefText(mode, record)); setCopyState("copied"); }
+    catch { setCopyState("failed"); }
+  }
 
-          <h2 className="section-title mt-3 max-w-xl text-[1.7rem] font-semibold sm:text-[2.2rem]">
-            Turn the current snapshot into a decision brief.
-          </h2>
-          <p className="section-copy mt-3 max-w-xl text-sm">
-            On-demand synthesis grounded only in the dashboard&apos;s evidence ledger. Every AI finding keeps its source references attached.
-          </p>
+  function downloadBrief() {
+    if (!record) return;
+    const url = URL.createObjectURL(new Blob([buildBriefText(mode, record)], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `pit-wall-${mode}-${record.brief.snapshotGeneratedAt.slice(0, 10)}.txt`;
+    document.body.append(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
-            {MODES.map((option) => {
-              const selected = option.id === mode;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setMode(option.id)}
-                  className={`flex items-center justify-between rounded-[14px] border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)] ${selected ? "border-[var(--team-accent)] bg-[var(--team-accent-wash)]" : "border-black/8 bg-white/45 hover:border-[var(--team-accent)]"}`}
-                >
-                  <span>
-                    <span className="block text-xs font-semibold text-[var(--foreground)]">{option.label}</span>
-                    <span className="mt-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">{option.detail}</span>
-                  </span>
-                  {selected ? <CheckCircle2 size={15} className="text-[var(--team-accent)]" /> : null}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void generateBrief()}
-            disabled={isLoading || status?.enabled !== true}
-            className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[var(--foreground)] px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--background)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--team-accent)]"
-          >
-            {isLoading ? <LoaderCircle size={15} className="animate-spin" /> : <BrainCircuit size={15} />}
-            {isLoading
-              ? "Building brief"
-              : status?.enabled
-                ? "Generate pit wall brief"
-                : error
-                  ? "NIM unavailable"
-                  : status
-                    ? "Configure NIM to generate"
-                    : "Checking NIM"}
-          </button>
-
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">
-            <span>{evidence.length} evidence records</span>
-            <span>Server-side key</span>
-            <span>No model claims stored</span>
-          </div>
-        </div>
-
-        <div className="minimal-card min-h-[330px] rounded-[20px] p-4 sm:rounded-[22px] sm:p-5">
-          {brief ? (
-            <div className="flex h-full flex-col">
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-black/8 pb-4">
-                <div className="min-w-0">
-                  <div className="eyebrow">Generated readout</div>
-                  <h3 className="section-title mt-2 text-xl font-semibold sm:text-[1.65rem]">{brief.headline}</h3>
-                </div>
-                <span className="telemetry-text rounded-full bg-black/5 px-2.5 py-1 text-[10px] text-[var(--muted)]">
-                  {shortModelName(brief.model)}
-                </span>
-              </div>
-              <p className="mt-4 text-sm leading-6 text-[var(--foreground)]">{brief.readout}</p>
-              <div className="mt-4 grid gap-2.5">
-                {brief.findings.map((finding, index) => (
-                  <div key={`${finding.label}-${index}`} className="rounded-[14px] border border-black/7 bg-white/55 p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="telemetry-text text-[10px] font-semibold text-[var(--team-accent)]">0{index + 1}</span>
-                      <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--foreground)]">{finding.label}</span>
-                    </div>
-                    <p className="mt-2 text-sm leading-5 text-[var(--muted)]">{finding.insight}</p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {finding.evidenceRefs.map((ref) => {
-                        const item = evidenceByRef.get(ref);
-                        return (
-                          <span
-                            key={`${finding.label}-${ref}`}
-                            title={item ? `${item.source}: ${item.fact}` : ref}
-                            className="rounded-full border border-[#76b900]/20 bg-[#76b900]/8 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-[#4f7d00]"
-                          >
-                            {ref}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {brief.watchNext.length ? (
-                <div className="mt-4 border-t border-black/8 pt-4">
-                  <div className="eyebrow">Watch next</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {brief.watchNext.map((item) => (
-                      <span key={item} className="rounded-full bg-black/5 px-3 py-1.5 text-[11px] text-[var(--foreground)]">{item}</span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {error ? (
-                <div role="alert" className="mt-4 rounded-[14px] border border-[#e10600]/18 bg-[#e10600]/8 px-3 py-2.5 text-xs leading-5 text-[#a60000]">
-                  {error} The previous successful brief remains visible.
-                </div>
-              ) : null}
-              <p className="mt-4 text-[11px] leading-5 text-[var(--muted)]">{brief.caveat}</p>
-            </div>
-          ) : (
-            <div className="flex h-full flex-col justify-between gap-6">
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-[14px] bg-[var(--team-accent-wash)] text-[var(--team-accent)]">
-                    <Gauge size={18} />
-                  </span>
-                  <span className="telemetry-text text-[10px] uppercase tracking-[0.12em] text-[var(--muted)]">On demand / no cache</span>
-                </div>
-                <div className="section-title mt-6 text-xl font-semibold">A brief with receipts, not vibes.</div>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-                  NIM receives a compact snapshot of schedule, weather, timing, standings, strategy, and sourced coverage. Unsupported citations are rejected before the result reaches this panel.
-                </p>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="rounded-[14px] border border-black/7 bg-white/55 p-3">
-                  <BrainCircuit size={15} className="text-[var(--team-accent)]" />
-                  <div className="mt-3 text-xs font-semibold">Synthesize</div>
-                  <div className="mt-1 text-[11px] leading-4 text-[var(--muted)]">Compress the noisy snapshot.</div>
-                </div>
-                <div className="rounded-[14px] border border-black/7 bg-white/55 p-3">
-                  <ShieldCheck size={15} className="text-[#00a76f]" />
-                  <div className="mt-3 text-xs font-semibold">Ground</div>
-                  <div className="mt-1 text-[11px] leading-4 text-[var(--muted)]">Require valid evidence refs.</div>
-                </div>
-                <div className="rounded-[14px] border border-black/7 bg-white/55 p-3">
-                  <Sparkles size={15} className="text-[#76b900]" />
-                  <div className="mt-3 text-xs font-semibold">Focus</div>
-                  <div className="mt-1 text-[11px] leading-4 text-[var(--muted)]">Surface what changes the read.</div>
-                </div>
-              </div>
-              {error ? (
-                <div role="alert" className="rounded-[14px] border border-[#e10600]/18 bg-[#e10600]/8 px-3 py-2.5 text-xs leading-5 text-[#a60000]">
-                  {error}
-                </div>
-              ) : status?.enabled === false ? (
-                <div className="rounded-[14px] border border-black/8 bg-black/4 px-3 py-2.5 text-xs leading-5 text-[var(--muted)]">
-                  Add <code className="telemetry-text text-[var(--foreground)]">NVIDIA_API_KEY</code> on the server, or point <code className="telemetry-text text-[var(--foreground)]">NVIDIA_NIM_BASE_URL</code> at a self-hosted NIM.
-                </div>
-              ) : null}
-            </div>
-          )}
-        </div>
+  return <section className={styles.panel} aria-labelledby="pit-wall-title">
+    <header className={styles.header}>
+      <div><div className={styles.eyebrow}>Race intelligence / Pit wall</div>
+        <h2 id="pit-wall-title">Your next read.</h2>
+        <p>Schedule, performance and context. Every fact, with its source.</p>
       </div>
-    </section>
-  );
+      <div className={styles.actions}>
+        <button onClick={() => void copyBrief()} disabled={!record} aria-label="Copy brief">
+          {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}
+          {copyState === "copied" ? "Copied" : "Copy"}
+        </button>
+        <button onClick={downloadBrief} disabled={!record}><Download size={15} /> Export</button>
+      </div>
+    </header>
+    <div className={styles.toolbar}>
+      <div className={styles.modes} role="group" aria-label="Briefing mode">
+        {MODES.map((option) => <button key={option.id} aria-pressed={option.id === mode}
+          onClick={() => { setMode(option.id); setQuery(""); setEvidenceKind("all"); setCopyState("idle"); }}>{option.label}</button>)}
+      </div>
+      <span className={styles.provenance}>{brief?.selectionMethod === "nim" ? "NVIDIA ordered" : "Snapshot order · no AI"}</span>
+    </div>
+    <div className={styles.contextBar}>
+      {mode === "driver-focus" ? <label className={styles.driverPicker}>Following
+        <select aria-label="Briefing driver" value={selectedDriver?.id ?? ""} onChange={(event) => onSelectDriver(event.target.value)}>
+          {!selectedDriver && <option value="" disabled>Select a driver</option>}
+          {dashboard.standings.map((driver) => <option value={driver.id} key={driver.id}>{driver.fullName} · {driver.abbreviation}</option>)}
+        </select>
+      </label> : <span>Dates shown in {timeZone}</span>}
+      <button aria-label="Show briefing dates in local time" aria-pressed={localTime}
+        onClick={() => setTimeDisplay({ zone: localTime ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone, local: !localTime })}>
+        {localTime ? "Use UTC" : "Use local time"}
+      </button>
+    </div>
+    {mode === "driver-focus" && !scoped.some((item) => item.kind === "timing") && <p className={styles.modeNote}>No timing record for {selectedDriver?.fullName ?? "the selected driver"} in this snapshot. Available standings, strategy and session evidence remain below.</p>}
+    {!current && <div className={styles.notice} role="status">The dashboard or selected driver has changed. This saved brief uses an earlier snapshot.
+      <button onClick={() => setRecords((previous) => ({ ...previous, [mode]: undefined }))}>Use current snapshot</button>
+    </div>}
+    <div className={styles.cards} key={`${mode}-${brief?.generatedAt}-${brief?.selectionMethod}`}>
+      {brief?.findings.map((finding, index) => {
+        const item = byRef.get(finding.evidenceRefs[0]);
+        return <article className={styles.card} key={finding.evidenceRefs[0]}>
+          <div className={styles.cardTop}><span className={styles.number}>0{index + 1}</span><span>{item?.kind ?? "Evidence"}</span></div>
+          <h3>{finding.label}</h3>
+          <p className={styles.context}><ReadableText value={finding.context ?? "Context unavailable"} timeZone={timeZone} /></p>
+          <p className={styles.fact}><ReadableText value={finding.insight} timeZone={timeZone} /></p>
+          {item && <Receipt item={item} />}
+        </article>;
+      })}
+    </div>
+    {!brief && <p className={styles.notice}>No usable facts in this snapshot. Check the dashboard data sources and refresh.</p>}
+    <div className={styles.refinement}>
+      <div><strong><Sparkles size={15} /> A second reading, with NVIDIA</strong>
+        <p>AI prioritizes the supplied records. Facts and event context stay unchanged.</p>
+        <span>{statusError ? "Provider status unavailable" : status?.enabled ? "NIM configured · availability checked on request" : status ? "NIM not configured · snapshot brief available" : "Checking NIM configuration…"}</span>
+      </div>
+      {loadingMode ? <div className={styles.loading}>
+        <span role="status"><LoaderCircle size={15} className={styles.spinner} /> {MODES.find((item) => item.id === loadingMode)?.label} · {elapsed}s</span>
+        <button onClick={() => request.current?.abort()}><X size={14} /> Cancel</button>
+      </div> : <button className={styles.primary} disabled={status?.enabled !== true || scoped.length < 2 || !brief} onClick={() => void refine()}>
+        <Sparkles size={15} /> {errors[mode] ? "Retry with NVIDIA" : "Prioritize with NVIDIA"}
+      </button>}
+    </div>
+    {errors[mode] && <p className={styles.notice} role="status">{errors[mode]}</p>}
+    {copyState === "failed" && <p className={styles.notice} role="status">Clipboard unavailable. Export the brief instead.</p>}
+    <details className={styles.explorer} key={`sources-${mode}`}>
+      <summary>Explore the evidence <span>{receipts.length} records</span></summary>
+      <div className={styles.search}><Search size={16} /><input aria-label="Search briefing evidence" placeholder="Search driver, circuit, weather or source…" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+      <div className={styles.filters} role="group" aria-label="Evidence category">
+        {["all", ...new Set(receipts.map((item) => item.kind))].map((kind) => <button key={kind} aria-pressed={evidenceKind === kind} onClick={() => setEvidenceKind(kind)}>{kind}</button>)}
+      </div>
+      <p className={styles.resultCount} role="status">{visibleEvidence.length} of {receipts.length} records</p>
+      <div className={styles.evidenceList}>{visibleEvidence.map((item) => <div key={item.ref}>
+        <span className={styles.eyebrow}>{item.kind}</span><h4>{item.label}</h4><Receipt item={item} />
+      </div>)}</div>
+      {!visibleEvidence.length && <div className={styles.modeNote}>No matching evidence. <button onClick={() => { setQuery(""); setEvidenceKind("all"); }}>Clear filters</button></div>}
+    </details>
+    <footer className={styles.footer}>
+      <span>Snapshot <time dateTime={brief?.snapshotGeneratedAt ?? dashboard.generatedAt}>{formatBriefDate(brief?.snapshotGeneratedAt ?? dashboard.generatedAt, timeZone)}</time></span>
+      <span>Feed accuracy and freshness depend on upstream sources.</span>
+    </footer>
+  </section>;
 }
