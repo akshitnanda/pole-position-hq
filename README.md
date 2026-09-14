@@ -13,6 +13,10 @@ Live demo: https://polehq.vercel.app
 - Motorsport.com, The Race, Reddit, and optional X activity feeds
 - Race intelligence workspace for sourced upgrade mentions, evidence strength, and timing deltas
 - NVIDIA NIM-powered Pit Wall AI briefs with evidence references and server-side credentials
+- Session-only Pit Wall AI workspaces per brief mode, with mode-scoped frozen evidence receipts, server-locked fact cards, stale-snapshot labeling, and source-complete text export
+- NIM selects references only; headlines, cards, and the next-session item are assembled from dashboard records. Archived timing and strategy keep their circuit, date, and session context in the brief and export.
+- Pit Wall opens with an immediate three-card snapshot brief (fixed rules, explicitly not AI). NVIDIA refinement is optional and cancellable; a failed request leaves the readable brief in place. Searchable source receipts and exports use the exact displayed snapshot. Driver focus excludes other drivers' timing records.
+- Driver Focus has an inline driver picker and includes the selected driver's timing beyond the top six. Brief dates can be read in UTC or browser-local time; original timestamps stay intact in receipts and exports. Evidence search supports category filters.
 - Scrub-linked telemetry, 0.5x-16x session replay, and circuit-map synchronization
 - Official OpenF1 team-radio clips with session-scoped driver attribution
 - Opt-in local session reminders plus Google and Apple calendar links

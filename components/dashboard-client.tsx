@@ -5530,7 +5530,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       {activeTab === "analysis" ? (
         <div className="grid gap-4 sm:gap-5">
           <WidgetBoundary label="Pit Wall AI">
-            <PitWallAiPanel dashboard={data} selectedDriver={selectedDriver} />
+            <PitWallAiPanel dashboard={data} selectedDriver={selectedDriver} onSelectDriver={selectDriver} />
           </WidgetBoundary>
           <WidgetBoundary label="Strategy replay">
             <StrategyPanel

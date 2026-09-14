@@ -1,4 +1,4 @@
-import type { DashboardData, DriverInsight } from "@/lib/types";
+import type { DashboardData, DriverInsight, SessionSummary } from "@/lib/types";
 
 export const PIT_WALL_MODES = ["race-brief", "driver-focus", "weekend-outlook"] as const;
 
@@ -10,15 +10,18 @@ export type PitWallEvidence = {
   label: string;
   fact: string;
   source: string;
+  context?: string;
 };
 
 export type PitWallBrief = {
+  selectionMethod: "snapshot" | "nim";
   headline: string;
   readout: string;
   findings: Array<{
     label: string;
     insight: string;
     evidenceRefs: string[];
+    context?: string;
   }>;
   watchNext: string[];
   caveat: string;
@@ -55,6 +58,7 @@ function evidence(
   label: string,
   fact: string,
   source: string,
+  context?: string,
 ): PitWallEvidence {
   return {
     ref,
@@ -62,7 +66,14 @@ function evidence(
     label: clean(label, 80),
     fact: clean(fact),
     source: clean(source, 120),
+    context: context ? clean(context, 180) : undefined,
   };
+}
+
+function sessionContext(session: SessionSummary | null, status: string) {
+  return session
+    ? `${session.circuitName} / ${session.sessionName} / ${formatSessionTime(session.dateStart)} / ${status}`
+    : `Session unavailable / ${status}`;
 }
 
 export function buildPitWallEvidence(
@@ -79,6 +90,7 @@ export function buildPitWallEvidence(
         "Next session",
         `${data.nextSession.sessionName} at ${data.nextSession.circuitName}, ${data.nextSession.location}; starts ${formatSessionTime(data.nextSession.dateStart)}.`,
         data.sources.schedule.source,
+        sessionContext(data.nextSession, "scheduled"),
       ),
     );
   }
@@ -91,18 +103,22 @@ export function buildPitWallEvidence(
         weather.label,
         `${weather.temperatureC.toFixed(1)} C, ${weather.rainChance}% precipitation probability; ${weather.summary}.`,
         data.sources.weather.source,
+        `${weather.label} forecast / ${data.nextSession?.circuitName ?? "Circuit unavailable"}`,
       ),
     );
   });
 
-  data.timingTower.entries.slice(0, 6).forEach((entry, index) => {
+  data.timingTower.entries.forEach((entry, index) => {
+    // Keep stable tower refs and include the selected driver even outside the top six.
+    if (index >= 6 && (!selectedDriver?.id || entry.driverId !== selectedDriver.id)) return;
     ledger.push(
       evidence(
         `TIMING-${index + 1}`,
         "timing",
-        `${entry.abbreviation} timing`,
-        `P${entry.position}; best lap ${formatLap(entry.bestLap)}; last lap ${formatLap(entry.lastLap)}; gap ${entry.gapToLeader ?? "unavailable"}; compound ${entry.compound ?? "unavailable"}; status ${entry.raceStatus}.`,
+        `${entry.fullName} timing`,
+        `${entry.fullName} (${entry.abbreviation}), ${entry.teamName}: P${entry.position}; best lap ${formatLap(entry.bestLap)}; last lap ${formatLap(entry.lastLap)}; gap ${entry.gapToLeader ?? "unavailable"}; compound ${entry.compound ?? "unavailable"}; status ${entry.raceStatus}.`,
         `${data.sources.telemetry.source} / ${data.timingTower.status} snapshot`,
+        sessionContext(data.timingTower.session, data.timingTower.status),
       ),
     );
   });
@@ -113,8 +129,9 @@ export function buildPitWallEvidence(
         `DRIVER-${selectedDriver.abbreviation}`,
         "driver",
         selectedDriver.fullName,
-        `P${selectedDriver.standingPosition} in the championship with ${selectedDriver.points} points for ${selectedDriver.teamName}; archived average lap ${formatLap(selectedDriver.avgLap)}.`,
-        "F1 standings and OpenF1 archived lap data",
+        `P${selectedDriver.standingPosition} in the championship with ${selectedDriver.points} points for ${selectedDriver.teamName}.`,
+        "F1 standings",
+        `${data.season} championship standings`,
       ),
     );
 
@@ -141,6 +158,7 @@ export function buildPitWallEvidence(
           `${selectedDriver.abbreviation} strategy replay`,
           `Final P${strategy.finalPosition}; stints: ${stints || "unavailable"}; observed post-stop labels: ${outcomes || "unavailable"}. Labels are directional, not causal proof.`,
           `${data.sources.telemetry.source} / archived stint and pit sequence`,
+          sessionContext(data.strategy.session, data.strategy.status),
         ),
       );
     }
