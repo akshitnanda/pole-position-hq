@@ -5,6 +5,15 @@ export type BriefRecord = {
   evidence: PitWallEvidence[];
 };
 
+export function buildBriefFilename(mode: PitWallMode, record: BriefRecord) {
+  const name = mode === "weekend-outlook" ? "weekend" : record.evidence.find((item) => item.kind === "driver")?.label ?? "field";
+  const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "field";
+  const date = new Date(record.brief.snapshotGeneratedAt);
+  const stamp = Number.isNaN(date.getTime()) ? "undated" : date.toISOString().replace(/[:.]/g, "-");
+  return `pit-wall-${mode}-${slug}-${stamp}.txt`;
+}
+
 export function buildBriefText(mode: PitWallMode, record: BriefRecord) {
   const evidenceByRef = new Map(record.evidence.map((item) => [item.ref, item]));
   const citedRefs = new Set(record.brief.findings.flatMap((finding) => finding.evidenceRefs));

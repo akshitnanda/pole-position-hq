@@ -1,13 +1,17 @@
 "use client";
 
-import { Check, Copy, Download, LoaderCircle, Search, Sparkles, X } from "lucide-react";
+import { Bookmark, Check, Copy, Download, LoaderCircle, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildPitWallEvidence, type PitWallBrief, type PitWallEvidence, type PitWallMode } from "@/lib/pit-wall-ai";
 import { buildSnapshotBrief, scopePitWallEvidence } from "@/lib/pit-wall-selection";
-import { buildBriefText, type BriefRecord } from "@/lib/pit-wall-export";
+import { buildBriefFilename, buildBriefText, type BriefRecord } from "@/lib/pit-wall-export";
+import { buildBriefLibraryText } from "@/lib/brief-library-export";
 import { briefTextParts, formatBriefDate } from "@/lib/pit-wall-presentation";
 import type { DashboardData, DriverInsight } from "@/lib/types";
 import styles from "./pit-wall-ai.module.css";
+import { briefCheckpointKey, type BriefCheckpoints, type BriefLibraryEntry } from "@/lib/brief-checkpoints";
+import { BriefChanges } from "./brief-changes";
+import { BriefLibrary } from "./brief-library";
 
 const MODES: Array<{ id: PitWallMode; label: string }> = [
   { id: "race-brief", label: "Race brief" },
@@ -29,17 +33,18 @@ function Receipt({ item }: { item: PitWallEvidence }) {
   </details>;
 }
 
-export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
+export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver, mode, onModeChange: setMode, records, onSaveRecord, libraryEntries, onOpenCheckpoint }: {
   dashboard: DashboardData; selectedDriver: DriverInsight | null; onSelectDriver: (driverId: string) => void;
+  mode: PitWallMode; onModeChange: (mode: PitWallMode) => void;
+  records: BriefCheckpoints; onSaveRecord: (key: string, record?: BriefRecord) => void;
+  libraryEntries: BriefLibraryEntry[]; onOpenCheckpoint: (entry: BriefLibraryEntry) => void;
 }) {
-  const [mode, setMode] = useState<PitWallMode>("race-brief");
   const [status, setStatus] = useState<NimStatus | null>(null);
   const [statusError, setStatusError] = useState(false);
-  const [records, setRecords] = useState<Partial<Record<PitWallMode, BriefRecord>>>({});
   const [loadingMode, setLoadingMode] = useState<PitWallMode | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [errors, setErrors] = useState<Partial<Record<PitWallMode, string>>>({});
-  const [copyState, setCopyState] = useState("idle");
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [copyResult, setCopyResult] = useState({ key: "", status: "idle" });
   const [query, setQuery] = useState("");
   const [{ zone: timeZone, local: localTime }, setTimeDisplay] = useState({ zone: "UTC", local: false });
   const [evidenceKind, setEvidenceKind] = useState("all");
@@ -47,8 +52,13 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
   const evidence = useMemo(() => buildPitWallEvidence(dashboard, selectedDriver), [dashboard, selectedDriver]);
   const scoped = useMemo(() => scopePitWallEvidence(evidence, mode), [evidence, mode]);
   const snapshot = useMemo(() => buildSnapshotBrief(scoped, mode, dashboard.generatedAt), [scoped, mode, dashboard.generatedAt]);
-  const record = records[mode] ?? (snapshot ? { brief: snapshot, evidence: scoped } : null);
+  const recordKey = briefCheckpointKey(mode, selectedDriver?.id ?? null, dashboard.season);
+  const saved = records[recordKey];
+  const record = saved ?? (snapshot ? { brief: snapshot, evidence: scoped } : null);
   const brief = record?.brief;
+  const copyKey = JSON.stringify([recordKey, brief?.generatedAt, brief?.selectionMethod]);
+  const copyState = copyResult.key === copyKey ? copyResult.status : "idle";
+  function setCopyState(status: string) { setCopyResult({ key: copyKey, status }); }
   const current = !record || (record.brief.snapshotGeneratedAt === dashboard.generatedAt
     && JSON.stringify(record.evidence) === JSON.stringify(scoped));
   const receipts = record?.evidence ?? scoped;
@@ -81,13 +91,14 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
     const controller = new AbortController();
     request.current = controller;
     const requestMode = mode;
+    const requestKey = recordKey;
     const submittedEvidence = scoped;
     let timedOut = false;
     const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); },
       Math.min(status?.requestTimeoutMs ?? 45_000, 45_000) + 5_000);
     setLoadingMode(requestMode);
     setElapsed(0);
-    setErrors((previous) => ({ ...previous, [requestMode]: undefined }));
+    setErrors((previous) => ({ ...previous, [requestKey]: undefined }));
     try {
       const response = await fetch("/api/ai-brief", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
@@ -96,13 +107,13 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
       const payload = await response.json() as PitWallBrief & { message?: string };
       if (!response.ok) throw new Error(payload.message ?? "NVIDIA could not refine this brief.");
       if (controller.signal.aborted) return;
-      setRecords((previous) => ({ ...previous, [requestMode]: { brief: payload, evidence: submittedEvidence } }));
+      onSaveRecord(requestKey, { brief: payload, evidence: submittedEvidence });
       setCopyState("idle");
     } catch (reason) {
       const message = controller.signal.aborted
         ? timedOut ? "NVIDIA took too long. Your existing brief is still available." : "Refinement cancelled. Your existing brief is unchanged."
         : `${reason instanceof Error ? reason.message : "NVIDIA is unavailable."} Your existing brief is unchanged.`;
-      setErrors((previous) => ({ ...previous, [requestMode]: message }));
+      setErrors((previous) => ({ ...previous, [requestKey]: message }));
     } finally {
       window.clearTimeout(timeout);
       request.current = null;
@@ -116,14 +127,17 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
     catch { setCopyState("failed"); }
   }
 
-  function downloadBrief() {
-    if (!record) return;
-    const url = URL.createObjectURL(new Blob([buildBriefText(mode, record)], { type: "text/plain;charset=utf-8" }));
+  function downloadText(text: string, filename: string) {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `pit-wall-${mode}-${record.brief.snapshotGeneratedAt.slice(0, 10)}.txt`;
+    link.download = filename;
     document.body.append(link); link.click(); link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function downloadBrief(exportRecord = record, exportMode = mode) {
+    if (exportRecord) downloadText(buildBriefText(exportMode, exportRecord), buildBriefFilename(exportMode, exportRecord));
   }
 
   return <section className={styles.panel} aria-labelledby="pit-wall-title">
@@ -133,13 +147,20 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
         <p>Schedule, performance and context. Every fact, with its source.</p>
       </div>
       <div className={styles.actions}>
+        <button onClick={() => { if (record) onSaveRecord(recordKey, record); }} disabled={!record || Boolean(saved)}>
+          <Bookmark size={15} /> {saved ? "Kept" : "Keep brief"}
+        </button>
         <button onClick={() => void copyBrief()} disabled={!record} aria-label="Copy brief">
           {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}
           {copyState === "copied" ? "Copied" : "Copy"}
         </button>
-        <button onClick={downloadBrief} disabled={!record}><Download size={15} /> Export</button>
+        <button onClick={() => downloadBrief()} disabled={!record}><Download size={15} /> Export</button>
       </div>
     </header>
+    <BriefLibrary entries={libraryEntries} activeKey={recordKey}
+      onOpen={(entry) => { onOpenCheckpoint(entry); setQuery(""); setEvidenceKind("all"); setCopyState("idle"); }}
+      onExport={(entry) => downloadBrief(entry.record, entry.mode)}
+      onExportAll={() => downloadText(buildBriefLibraryText(libraryEntries), "pole-position-saved-briefing-pack.txt")} />
     <div className={styles.toolbar}>
       <div className={styles.modes} role="group" aria-label="Briefing mode">
         {MODES.map((option) => <button key={option.id} aria-pressed={option.id === mode}
@@ -159,10 +180,14 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
         {localTime ? "Use UTC" : "Use local time"}
       </button>
     </div>
-    {mode === "driver-focus" && !scoped.some((item) => item.kind === "timing") && <p className={styles.modeNote}>No timing record for {selectedDriver?.fullName ?? "the selected driver"} in this snapshot. Available standings, strategy and session evidence remain below.</p>}
-    {!current && <div className={styles.notice} role="status">The dashboard or selected driver has changed. This saved brief uses an earlier snapshot.
-      <button onClick={() => setRecords((previous) => ({ ...previous, [mode]: undefined }))}>Use current snapshot</button>
+    {mode === "driver-focus" && !receipts.some((item) => item.kind === "timing") && <p className={styles.modeNote}>No timing record for {selectedDriver?.fullName ?? "the selected driver"} in this brief. Available standings, strategy and session evidence remain below.</p>}
+    {saved && <div className={styles.checkpoint}>
+      <div><strong>{current ? "Checkpoint kept" : "Earlier snapshot kept"}</strong>
+        <p>Saved for this {mode === "weekend-outlook" ? "weekend outlook" : `${selectedDriver?.fullName ?? "driver"} brief`}. Survives workspace navigation; cleared on page reload. Copy and export use the saved version.</p>
+      </div>
+      <button onClick={() => { onSaveRecord(recordKey); setCopyState("idle"); }}>Use current snapshot</button>
     </div>}
+    {saved && <BriefChanges before={saved.evidence} after={scoped} savedAt={saved.brief.snapshotGeneratedAt} currentAt={dashboard.generatedAt} />}
     <div className={styles.cards} key={`${mode}-${brief?.generatedAt}-${brief?.selectionMethod}`}>
       {brief?.findings.map((finding, index) => {
         const item = byRef.get(finding.evidenceRefs[0]);
@@ -185,10 +210,10 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver }: {
         <span role="status"><LoaderCircle size={15} className={styles.spinner} /> {MODES.find((item) => item.id === loadingMode)?.label} · {elapsed}s</span>
         <button onClick={() => request.current?.abort()}><X size={14} /> Cancel</button>
       </div> : <button className={styles.primary} disabled={status?.enabled !== true || scoped.length < 2 || !brief} onClick={() => void refine()}>
-        <Sparkles size={15} /> {errors[mode] ? "Retry with NVIDIA" : "Prioritize with NVIDIA"}
+        <Sparkles size={15} /> {errors[recordKey] ? "Retry with NVIDIA" : "Prioritize with NVIDIA"}
       </button>}
     </div>
-    {errors[mode] && <p className={styles.notice} role="status">{errors[mode]}</p>}
+    {errors[recordKey] && <p className={styles.notice} role="status">{errors[recordKey]}</p>}
     {copyState === "failed" && <p className={styles.notice} role="status">Clipboard unavailable. Export the brief instead.</p>}
     <details className={styles.explorer} key={`sources-${mode}`}>
       <summary>Explore the evidence <span>{receipts.length} records</span></summary>

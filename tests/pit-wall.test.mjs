@@ -30,8 +30,189 @@ function loadModule(relative, provider = async () => { throw new Error("Unexpect
 
 const { assemblePitWallBrief, buildSnapshotBrief, scopePitWallEvidence } = loadModule("lib/pit-wall-selection.ts");
 const { buildPitWallEvidence } = loadModule("lib/pit-wall-ai.ts");
-const { buildBriefText } = loadModule("lib/pit-wall-export.ts");
+const { buildBriefText, buildBriefFilename } = loadModule("lib/pit-wall-export.ts");
+const { buildBriefLibraryText } = loadModule("lib/brief-library-export.ts");
 const { briefTextParts, formatBriefDate } = loadModule("lib/pit-wall-presentation.ts");
+const { searchDashboardCommands } = loadModule("lib/dashboard-commands.ts");
+const { summarizeSourceHealth, scheduleContext } = loadModule("lib/cockpit-status.ts");
+const { briefCheckpointKey, updateBriefCheckpoint, compareBriefEvidence, listBriefCheckpoints } = loadModule("lib/brief-checkpoints.ts");
+
+test("briefing pack preserves each checkpoint scope, frozen facts and receipts including unavailable drivers", () => {
+  const makeRecord = (name, ref, date, fact) => {
+    const evidence = [{ ref, label: name, kind: "driver", fact, source: "F1 standings", context: "2026 championship" }];
+    return { evidence, brief: buildSnapshotBrief(evidence, "driver-focus", date) };
+  };
+  const ant = makeRecord("Kimi Antonelli", "DRIVER-ANT", "2026-09-28T12:00:00Z", "Frozen 302 points");
+  const bor = makeRecord("Gabriel Bortoleto", "DRIVER-BOR", "2026-09-29T12:00:00Z", "Frozen 10 points");
+  bor.brief.selectionMethod = "nim";
+  bor.brief.model = "test-model";
+  const entries = listBriefCheckpoints({
+    [briefCheckpointKey("driver-focus", "ANT", 2026)]: ant,
+    [briefCheckpointKey("driver-focus", "BOR", 2026)]: bor,
+  }, [{ id: "ANT", fullName: "Kimi Antonelli" }], 2026);
+  const original = JSON.stringify(entries);
+  const text = buildBriefLibraryText(entries);
+  assert.match(text, /2 saved checkpoints/);
+  assert.match(text, /cannot be imported/);
+  assert.ok(text.includes(buildBriefText("driver-focus", ant)));
+  assert.ok(text.includes(buildBriefText("driver-focus", bor)));
+  assert.match(text, /driver: ANT/);
+  assert.match(text, /driver: BOR/);
+  assert.match(text, /Driver is not in the current standings/);
+  assert.match(text, /Selection: NVIDIA NIM/);
+  assert.match(text, /Selection: Fixed snapshot rules \(no AI\)/);
+  assert.equal(JSON.stringify(entries), original);
+});
+
+test("individual export names distinguish drivers and snapshots and avoid unsafe filename characters", () => {
+  const record = { evidence: [{ kind: "driver", label: "Nico Hülkenberg / test:*?" }], brief: { snapshotGeneratedAt: "2026-09-30T17:07:59.382Z" } };
+  const filename = buildBriefFilename("driver-focus", record);
+  assert.match(filename, /nico-hulkenberg-test/);
+  assert.ok(!/[<>:"/\\|?*]/.test(filename));
+  assert.notEqual(filename, buildBriefFilename("driver-focus", { ...record, evidence: [{ kind: "driver", label: "Kimi Antonelli" }] }));
+  assert.notEqual(filename, buildBriefFilename("driver-focus", { ...record, brief: { snapshotGeneratedAt: "2026-09-30T18:00:00Z" } }));
+  assert.match(buildBriefFilename("weekend-outlook", record), /weekend/);
+  assert.match(buildBriefFilename("race-brief", { evidence: [], brief: { snapshotGeneratedAt: "invalid" } }), /field-undated\.txt$/);
+});
+
+test("empty briefing pack is explicit and deterministic", () => {
+  assert.match(buildBriefLibraryText([]), /0 saved checkpoints/);
+  assert.equal(buildBriefLibraryText([]), buildBriefLibraryText([]));
+});
+
+test("saved brief library restores explicit driver/mode scope and uses frozen driver names", () => {
+  const key = briefCheckpointKey("driver-focus", "ANT", 2026);
+  const record = { brief: { snapshotGeneratedAt: "2026-09-28T12:00:00Z" }, evidence: [{ kind: "driver", label: "Frozen driver name" }] };
+  const [entry] = listBriefCheckpoints({ [key]: record }, [{ id: "ANT", fullName: "New name" }], 2026);
+  assert.equal(entry.label, "Driver focus · Frozen driver name");
+  assert.equal(entry.driverId, "ANT");
+  assert.equal(entry.mode, "driver-focus");
+  assert.equal(entry.key, key);
+  assert.equal(entry.record, record);
+  assert.equal(entry.unavailableReason, null);
+});
+
+test("library retains unavailable checkpoints for export without mapping to another driver", () => {
+  const record = { brief: { snapshotGeneratedAt: "2026-09-28T12:00:00Z" }, evidence: [] };
+  const records = {
+    [briefCheckpointKey("driver-focus", "MISSING", 2026)]: record,
+    [briefCheckpointKey("race-brief", "ANT", 2025)]: record,
+    [briefCheckpointKey("weekend-outlook", null, 2026)]: record,
+  };
+  const entries = listBriefCheckpoints(records, [{ id: "ANT", fullName: "Kimi" }], 2026);
+  assert.equal(entries.length, 3);
+  assert.match(entries.find((entry) => entry.driverId === "MISSING").unavailableReason, /not in the current standings/);
+  assert.match(entries.find((entry) => entry.season === 2025).unavailableReason, /2025 season/);
+  assert.equal(entries.find((entry) => entry.mode === "weekend-outlook").unavailableReason, null);
+  assert.ok(entries.every((entry) => entry.record === record));
+});
+
+test("library sorts snapshots newest-first and skips invalid checkpoint scope keys", () => {
+  const makeRecord = (date) => ({ brief: { snapshotGeneratedAt: date }, evidence: [] });
+  const records = {
+    [briefCheckpointKey("race-brief", "ANT", 2026)]: makeRecord("2026-09-26T12:00:00Z"),
+    [briefCheckpointKey("driver-focus", "ANT", 2026)]: makeRecord("2026-09-28T12:00:00Z"),
+    [briefCheckpointKey("weekend-outlook", null, 2026)]: makeRecord("invalid"),
+    broken: makeRecord("2026-09-29T12:00:00Z"),
+    '[2026,"__proto__",null]': makeRecord("2026-09-29T12:00:00Z"),
+    '[2026,"weekend-outlook","ANT"]': makeRecord("2026-09-29T12:00:00Z"),
+    '[2026,"race-brief",42]': makeRecord("2026-09-29T12:00:00Z"),
+    '[2026,"race-brief",null,"extra"]': makeRecord("2026-09-29T12:00:00Z"),
+  };
+  assert.deepEqual(listBriefCheckpoints(records, [], 2026).map((entry) => entry.mode), ["driver-focus", "race-brief", "weekend-outlook"]);
+  assert.deepEqual(listBriefCheckpoints({}, [], 2026), []);
+});
+
+test("brief checkpoints isolate driver-dependent modes and seasons, sharing only weekend outlook", () => {
+  for (const mode of ["race-brief", "driver-focus"]) {
+    assert.notEqual(briefCheckpointKey(mode, "ANT", 2026), briefCheckpointKey(mode, "BOR", 2026));
+    assert.notEqual(briefCheckpointKey(mode, "ANT", 2026), briefCheckpointKey(mode, "ANT", 2027));
+  }
+  assert.equal(briefCheckpointKey("weekend-outlook", "ANT", 2026), briefCheckpointKey("weekend-outlook", "BOR", 2026));
+  assert.notEqual(briefCheckpointKey("race-brief", "ANT", 2026), briefCheckpointKey("driver-focus", "ANT", 2026));
+});
+
+test("saving and releasing checkpoints preserve independent frozen records", () => {
+  const record = { brief: { findings: [{ insight: "Original" }] }, evidence: [{ fact: "Original" }] };
+  const original = {};
+  const saved = updateBriefCheckpoint(original, "a", record);
+  record.brief.findings[0].insight = "Changed";
+  record.evidence[0].fact = "Changed";
+  assert.deepEqual(original, {});
+  assert.equal(saved.a.brief.findings[0].insight, "Original");
+  assert.equal(saved.a.evidence[0].fact, "Original");
+  const second = updateBriefCheckpoint(saved, "b", record);
+  const released = updateBriefCheckpoint(second, "a");
+  assert.equal(released.a, undefined);
+  assert.equal(released.b.evidence[0].fact, "Changed");
+  assert.equal(second.a.evidence[0].fact, "Original");
+});
+
+test("evidence comparison ignores ordering and positional refs but catches source and event changes", () => {
+  const a = { ref: "TIMING-1", kind: "timing", label: "Driver A timing", fact: "P1", context: "Monza race", source: "OpenF1" };
+  const b = { ...a, ref: "TIMING-2", label: "Driver B timing", fact: "P2" };
+  assert.deepEqual(compareBriefEvidence([a, b], [{ ...b, ref: "TIMING-1" }, { ...a, ref: "TIMING-9" }]), []);
+  for (const update of [{ fact: "P3" }, { context: "Baku race" }, { source: "Fallback" }]) {
+    const changes = compareBriefEvidence([a], [{ ...a, ...update }]);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].type, "updated");
+    assert.equal(changes[0].before, a);
+  }
+  const replaced = compareBriefEvidence([a], [{ ...b, ref: a.ref }]);
+  assert.deepEqual(replaced.map((item) => item.type), ["removed", "added"]);
+});
+
+test("ambiguous duplicate labels are never guessed into before-after pairs", () => {
+  const a = { ref: "NEWS-1", kind: "news", label: "Same truncated title", fact: "First", source: "News" };
+  const b = { ...a, ref: "NEWS-2", fact: "Second" };
+  assert.deepEqual(compareBriefEvidence([a, b], [b, a]), []);
+  const changes = compareBriefEvidence([a, b], [a, { ...b, fact: "Third" }]);
+  assert.deepEqual(changes.map((item) => item.type), ["removed", "added"]);
+  assert.deepEqual(compareBriefEvidence([], []), []);
+  assert.equal(compareBriefEvidence([], [a])[0].type, "added");
+  assert.equal(compareBriefEvidence([a], [])[0].type, "removed");
+});
+
+test("cockpit health distinguishes cached, modeled, missing and live sources", () => {
+  const sources = Object.fromEntries(["live", "cached", "fallback", "simulated", "empty"].map((status) =>
+    [status, { label: status, source: "Fixture", status, updatedAt: null }]));
+  const health = summarizeSourceHealth(sources);
+  assert.equal(health.total, 5);
+  assert.equal(health.limited, 3);
+  assert.equal(health.summary, "3 of 5 feeds limited");
+  assert.deepEqual(health.counts, { live: 1, cached: 1, fallback: 1, simulated: 1, empty: 1 });
+  assert.equal(health.feeds[1].status, "cached");
+  assert.equal(summarizeSourceHealth({ cached: sources.cached }).summary, "1 of 1 feeds cached");
+  assert.equal(summarizeSourceHealth({ live: sources.live }).summary, "1 source feed live");
+  assert.equal(summarizeSourceHealth({}).summary, "No sources reported");
+});
+
+test("cockpit schedule never calls past, invalid or cancelled sessions upcoming", () => {
+  const snapshot = "2026-09-26T12:00:00Z";
+  const next = { dateStart: "2026-09-27T12:00:00Z", isCancelled: false };
+  assert.equal(scheduleContext(next, snapshot), "Next on schedule");
+  assert.equal(scheduleContext({ ...next, isCancelled: true }, snapshot), "Cancelled session");
+  assert.equal(scheduleContext({ ...next, dateStart: snapshot }, snapshot), "Schedule reference");
+  assert.equal(scheduleContext({ ...next, dateStart: "2026-09-20T12:00:00Z" }, snapshot), "Schedule reference");
+  assert.equal(scheduleContext({ ...next, dateStart: "invalid" }, snapshot), "Schedule reference");
+  assert.equal(scheduleContext(next, "invalid"), "Schedule reference");
+  assert.equal(scheduleContext(null, snapshot), "Schedule unavailable");
+});
+
+test("command search matches driver, team and category terms without running actions", () => {
+  let calls = 0;
+  const commands = [
+    { id: "theme", label: "Ferrari theme", detail: "LEC / HAM", category: "Theme", run: () => calls++ },
+    { id: "driver", label: "Charles Leclerc", detail: "LEC Ferrari", category: "Driver", run: () => calls++ },
+    { id: "refresh", label: "Refresh dashboard", detail: "Busy", category: "Action", disabled: true, run: () => calls++ },
+  ];
+  assert.deepEqual(searchDashboardCommands(commands, "ferrari driver").map((item) => item.id), ["driver"]);
+  assert.deepEqual(searchDashboardCommands(commands, "  LÉC ").map((item) => item.id), ["theme", "driver"]);
+  assert.equal(searchDashboardCommands(commands, "no-such-action").length, 0);
+  assert.equal(searchDashboardCommands(commands, "refresh")[0].disabled, true);
+  assert.deepEqual(searchDashboardCommands(commands, ""), commands);
+  assert.equal(calls, 0);
+});
 const archive = {
   circuitName: "Monza", sessionName: "Race", dateStart: "2026-09-06T13:00:00Z",
 };

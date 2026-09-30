@@ -26,7 +26,7 @@ type TimingEnvelope = {
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
+  return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
@@ -50,7 +50,7 @@ function parseJsonPayload(payload: string): unknown {
     return null;
   }
 
-  return JSON.parse(trimmed);
+  try { return JSON.parse(trimmed); } catch { return null; }
 }
 
 function pickNumber(...values: unknown[]) {
@@ -107,6 +107,20 @@ function parseRaceControlMessages(value: unknown): DashboardData["raceControl"] 
   };
 }
 
+function validateRaceControl(value: unknown): DashboardData["raceControl"] | undefined {
+  const record = asRecord(value);
+  if (!record || !["Idle", "Green", "Yellow", "Red", "VSC", "SC"].includes(String(record.flag))
+    || typeof record.message !== "string" || !Array.isArray(record.events)
+    || !(record.countdownEndsAt === null || typeof record.countdownEndsAt === "string")) return undefined;
+  const validEvents = record.events.every((event) => {
+    const row = asRecord(event);
+    return row && typeof row.id === "string" && typeof row.timestamp === "string"
+      && typeof row.message === "string" && ["flag", "pit", "incident", "overtake", "system"].includes(String(row.type))
+      && (row.driverId == null || typeof row.driverId === "string");
+  });
+  return validEvents ? record as DashboardData["raceControl"] : undefined;
+}
+
 export function parseLiveTimingPayload(payload: string): LiveTimingFrame | null {
   const parsed = parseJsonPayload(payload) as TimingEnvelope | null;
   const envelope = asRecord(parsed);
@@ -116,16 +130,21 @@ export function parseLiveTimingPayload(payload: string): LiveTimingFrame | null 
   }
 
   if (typeof envelope.type === "string") {
+    if (!["snapshot", "telemetry", "race-control", "heartbeat"].includes(envelope.type)) return null;
+    const sampleIndex = numberOrUndefined(envelope.sampleIndex);
+    const trackPosition = numberOrUndefined(envelope.trackPosition);
+    const raceControl = validateRaceControl(envelope.raceControl);
+    if (envelope.type !== "heartbeat" && sampleIndex === undefined && trackPosition === undefined && !raceControl) return null;
     return {
       type: envelope.type as LiveTimingFrame["type"],
       receivedAt:
         typeof envelope.receivedAt === "string"
           ? envelope.receivedAt
           : new Date().toISOString(),
-      sampleIndex: numberOrUndefined(envelope.sampleIndex),
-      trackPosition: numberOrUndefined(envelope.trackPosition),
+      sampleIndex,
+      trackPosition,
       latencyMs: numberOrUndefined(envelope.latencyMs),
-      raceControl: envelope.raceControl as DashboardData["raceControl"] | undefined,
+      raceControl,
     };
   }
 
@@ -133,7 +152,7 @@ export function parseLiveTimingPayload(payload: string): LiveTimingFrame | null 
   const invocationArgs = Array.isArray(envelope.A) ? envelope.A : [];
   const invocationPayload = asRecord(invocationArgs[0]);
   const signalRUpdates = updates ?? invocationPayload;
-  const timingData = asRecord(updates?.TimingData);
+  const timingData = asRecord(signalRUpdates?.TimingData);
   const carData = asRecord(signalRUpdates?.CarData);
   const raceControl = asRecord(signalRUpdates?.RaceControlMessages);
 
@@ -170,7 +189,7 @@ export function parseLiveTimingPayload(payload: string): LiveTimingFrame | null 
 
   const hubMessages = Array.isArray(envelope.M) ? envelope.M : [];
   const invocation = hubMessages.find(
-    (message) => message.H === "Streaming" || message.H === "streaming",
+    (message) => asRecord(message)?.H === "Streaming" || asRecord(message)?.H === "streaming",
   );
   const args = Array.isArray(invocation?.A) ? invocation.A : [];
   const firstArg = asRecord(args[0]);

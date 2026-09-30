@@ -7,7 +7,27 @@
 .panel button:hover:not(:disabled) { background: var(--surface-strong); }
 .panel button:disabled { opacity: .45; cursor: not-allowed; }
 .panel button:focus-visible, .panel summary:focus-visible, .panel input:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
-.actions { display: flex; align-items: flex-start; gap: 6px; }
+.actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
+.checkpoint { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 26px 12px; padding: 14px; background: var(--surface); border: 1px solid var(--line); border-left: 2px solid var(--team-accent); border-radius: 8px; }
+.checkpoint strong { font-size: 12px; }
+.checkpoint p { font-size: 11px; color: var(--muted); line-height: 1.7; margin-top: 4px; }
+.checkpoint button { flex-shrink: 0; }
+.changes { margin: 0 26px 22px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+.changes > summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.changes > summary span { display: inline-block; font-size: 10px; color: var(--muted); margin-left: 8px; font-weight: 400; }
+.changeNote { font-size: 11px; color: var(--muted); line-height: 1.7; margin: 12px 0; }
+.changeDates { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 10px; color: var(--muted); margin-bottom: 14px; }
+.changeList { display: grid; gap: 12px; max-height: 500px; overflow-y: auto; overscroll-behavior: contain; }
+.changeList article { border: 1px solid var(--line); border-radius: 6px; overflow-wrap: anywhere; }
+.changeList header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 12px; background: var(--surface); }
+.changeList h3 { font-size: 12px; font-weight: 600; }
+.changeList header > span { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.versions { display: grid; grid-template-columns: 1fr 1fr; }
+.version { padding: 12px; min-width: 0; font-size: 11px; line-height: 1.7; }
+.version + .version { border-left: 1px solid var(--line); }
+.version strong { text-transform: uppercase; font-size: 9px; letter-spacing: .12em; color: var(--muted); }
+.version p { margin: 8px 0; }
+.version small { display: block; font-size: 10px; color: var(--muted); }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 26px 20px; flex-wrap: wrap; }
 .modes { display: flex; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
 .modes button { border-color: transparent; color: var(--muted); }
@@ -58,6 +78,10 @@
 .footer { padding: 12px 26px; background: var(--surface); border-top: 1px solid var(--line); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--muted); }
 @media (max-width: 1000px) { .cards { grid-template-columns: 1fr; } .context { min-height: 0; } .card { padding: 16px; } .card h3 { margin-top: 8px; } }
 @media (max-width: 600px) {
+  .checkpoint, .changes { margin-left: 16px; margin-right: 16px; }
+  .checkpoint { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .versions { grid-template-columns: 1fr; }
+  .version + .version { border-left: 0; border-top: 1px solid var(--line); }
   .header { padding: 18px 16px; flex-wrap: wrap; gap: 12px; }
   .toolbar { padding: 0 16px 16px; gap: 10px; }
   .contextBar { margin: 0 16px 16px; }

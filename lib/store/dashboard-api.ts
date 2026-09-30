@@ -6,7 +6,7 @@ import type { DashboardData } from "@/lib/types";
 
 export const dashboardApi = createApi({
   reducerPath: "dashboardApi",
-  baseQuery: fetchBaseQuery({ baseUrl: "/" }),
+  baseQuery: fetchBaseQuery({ baseUrl: "/", timeout: 45_000 }),
   tagTypes: ["Dashboard"],
   endpoints: (builder) => ({
     getDashboard: builder.query<DashboardData, void>({
@@ -32,16 +32,12 @@ export const dashboardApi = createApi({
                   latencyMs: frame.latencyMs ?? draft.liveTiming.latencyMs,
                 };
 
-                if (frame.raceControl) {
+                if (frame.raceControl && connection === "websocket") {
                   draft.raceControl = frame.raceControl;
                 }
 
-                draft.sources.telemetry.status =
-                  connection === "websocket" ? "live" : "cached";
-                draft.sources.telemetry.note =
-                  connection === "websocket"
-                    ? "Live Timing Protocol frames are streaming through the configured WebSocket."
-                    : "Archived telemetry is available through a local replay transport; this is not a live upstream feed.";
+                // Transport frames move the playback cursor; they do not replace
+                // the archived car-data trace or establish its freshness.
               });
 
               if (typeof frame.latencyMs === "number") {

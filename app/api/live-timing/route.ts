@@ -17,15 +17,12 @@ export async function GET() {
     start(controller) {
       const encoder = new TextEncoder();
       const send = () => {
-        const sentAt = performance.now();
         const sample = samples[index % samples.length];
         const frame = encodeLiveTimingFrame({
           type: "telemetry",
           receivedAt: new Date().toISOString(),
           sampleIndex: sample.index ?? index % samples.length,
           trackPosition: sample.trackPosition ?? 0,
-          latencyMs: Math.max(4, Math.round(performance.now() - sentAt + 18)),
-          raceControl: dashboard.raceControl,
         });
 
         controller.enqueue(encoder.encode(`data: ${frame}\n\n`));

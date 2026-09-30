@@ -1,0 +1,27 @@
+.library { margin: 0 26px 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.library > summary { display: flex; align-items: center; gap: 8px; padding: 13px 15px; cursor: pointer; font-size: 12px; font-weight: 600; list-style: none; }
+.library > summary::-webkit-details-marker { display: none; }
+.library > summary::after { content: "+"; margin-left: auto; font-size: 16px; color: var(--muted); }
+.library[open] > summary::after { content: "−"; }
+.library > summary span { color: var(--muted); font-size: 10px; font-weight: 400; }
+.body { padding: 0 15px 15px; }
+.body > p { color: var(--muted); font-size: 11px; line-height: 1.7; margin-bottom: 12px; }
+.pack { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 14px; }
+.pack span { color: var(--muted); font-size: 10px; line-height: 1.6; flex: 1 1 180px; }
+.search { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.search input { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--background); color: var(--foreground); font-size: 12px; }
+.results { font-size: 10px; color: var(--muted); margin: 12px 0; }
+.list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+.description { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.description strong { font-size: 12px; font-weight: 600; }
+.description span, .description time { color: var(--muted); font-size: 10px; }
+.description .warning { line-height: 1.6; border-left: 2px solid var(--line); padding-left: 7px; }
+.actions { display: flex; gap: 6px; flex-shrink: 0; }
+.empty { font-size: 12px; color: var(--muted); line-height: 1.7; }
+@media (max-width: 600px) {
+  .library { margin-left: 16px; margin-right: 16px; }
+  .list li { flex-direction: column; align-items: stretch; gap: 12px; }
+  .actions { justify-content: flex-end; }
+  .search input { font-size: 16px; }
+}

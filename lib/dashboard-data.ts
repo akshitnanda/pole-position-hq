@@ -1969,36 +1969,34 @@ export async function getDashboardData(): Promise<DashboardData> {
         `${OPEN_F1_BASE}/team_radio?session_key=${recentRaceSession.session_key}`,
       )
     : Promise.resolve<OpenF1TeamRadio[]>([]);
-  const sessionResults = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1SessionResult>(
+  // Independent session feeds share one wait window. A failed feed still returns
+  // its own empty array without discarding results from the others.
+  const [sessionResults, intervals, laps, positions, stints, pits] = await Promise.all([
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1SessionResult>(
         `${OPEN_F1_BASE}/session_result?session_key=${recentRaceSession.session_key}`,
       )
-    : [];
-  const intervals = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1Interval>(
+    : Promise.resolve([]),
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1Interval>(
         `${OPEN_F1_BASE}/intervals?session_key=${recentRaceSession.session_key}&date>=${encodeURIComponent(intervalWindowStart ?? recentRaceSession.date_start)}`,
       )
-    : [];
-  const laps = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1Lap>(
+    : Promise.resolve([]),
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1Lap>(
         `${OPEN_F1_BASE}/laps?session_key=${recentRaceSession.session_key}`,
       )
-    : [];
-  const positions = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1Position>(
+    : Promise.resolve([]),
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1Position>(
         `${OPEN_F1_BASE}/position?session_key=${recentRaceSession.session_key}`,
       )
-    : [];
-  const stints = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1Stint>(
+    : Promise.resolve([]),
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1Stint>(
         `${OPEN_F1_BASE}/stints?session_key=${recentRaceSession.session_key}`,
       )
-    : [];
-  const pits = recentRaceSession
-    ? await fetchArrayOrEmpty<OpenF1Pit>(
+    : Promise.resolve([]),
+    recentRaceSession ? fetchArrayOrEmpty<OpenF1Pit>(
         `${OPEN_F1_BASE}/pit?session_key=${recentRaceSession.session_key}`,
       )
-    : [];
+    : Promise.resolve([]),
+  ]);
   const finalPositions: OpenF1Position[] = sessionResults.map((result, index) => ({
     date: recentRaceSession?.date_end ?? generatedAt,
     driver_number: result.driver_number,

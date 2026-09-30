@@ -70,6 +70,11 @@ import {
 } from "@/lib/store/ui-slice";
 import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 import { PitWallAiPanel } from "@/components/pit-wall-ai";
+import { DashboardCommandMenu } from "@/components/dashboard-command-menu";
+import { CockpitStatus } from "@/components/cockpit-status";
+import type { PitWallMode } from "@/lib/pit-wall-ai";
+import { formatBriefDate } from "@/lib/pit-wall-presentation";
+import { briefCheckpointKey, listBriefCheckpoints, updateBriefCheckpoint, type BriefCheckpoints, type BriefLibraryEntry } from "@/lib/brief-checkpoints";
 
 const DASHBOARD_PREFS_KEY = "pphq-dashboard-prefs/v1";
 const FOCUS_RING =
@@ -321,10 +326,11 @@ function ThemePicker({
   }, []);
 
   return (
-    <div ref={pickerRef} className="relative">
+    <div ref={pickerRef} className="static sm:relative">
       <button
         type="button"
         aria-haspopup="listbox"
+        aria-label={`Color theme: ${active.label}`}
         aria-expanded={isOpen}
         onClick={() => setIsOpen((open) => !open)}
         className={`utility-button inline-flex h-9 items-center gap-2 border border-[var(--line)] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)] ${FOCUS_RING}`}
@@ -3435,7 +3441,7 @@ function DashboardTabs({
               }`}
             >
               <span className={`telemetry-text hidden text-[9px] sm:inline ${active ? "opacity-60" : "opacity-45"}`}>{index + 1}</span>
-              <Icon size={14} aria-hidden="true" />
+              <Icon size={14} aria-hidden="true" className="hidden shrink-0 sm:block" />
               <span className="truncate text-xs font-semibold">{tab.label}</span>
             </button>
           );
@@ -4812,7 +4818,9 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       updatedAt: null,
       note: teamRadio.note,
     };
-  const refetch = () => query.refetch().unwrap();
+  // RTK's result promise resolves on failure; unwrap() would reject unattended
+  // auto-refresh and visibility handlers. query.error drives the snapshot banner.
+  const refetch = () => query.refetch();
   const isFetching = query.isFetching;
   const error = query.error;
 
@@ -4855,6 +4863,10 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const [hasMounted, setHasMounted] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [briefMode, setBriefMode] = useState<PitWallMode>("race-brief");
+  const [briefCheckpoints, setBriefCheckpoints] = useState<BriefCheckpoints>({});
+  const briefLibrary = useMemo(() => listBriefCheckpoints(briefCheckpoints, data.standings, data.season),
+    [briefCheckpoints, data.standings, data.season]);
   const [notificationPermission, setNotificationPermission] = useState<
     "default" | "granted" | "denied" | "unsupported"
   >("default");
@@ -5143,6 +5155,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
   const visualThemeOptions = useMemo<VisualThemeOption[]>(() => {
     const teams = new Map<string, { accent: string; drivers: string[] }>();
     data.standings.forEach((driver) => {
+      if (!driver.teamName || driver.teamName === "Constructor unavailable") return;
       const current = teams.get(driver.teamName) ?? {
         accent: driver.teamColor,
         drivers: [],
@@ -5347,6 +5360,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       if (
         target?.tagName === "INPUT" ||
         target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable ||
+        target?.closest("button, a, select, summary, dialog, [role='tab'], [role='combobox']") ||
         target?.getAttribute("role") === "slider"
       ) {
         return;
@@ -5390,12 +5405,19 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
     return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
+  function openBriefCheckpoint(entry: BriefLibraryEntry) {
+    if (entry.unavailableReason) return;
+    if (entry.driverId) selectDriver(entry.driverId);
+    setBriefMode(entry.mode);
+    setActiveTab("analysis");
+  }
+
   return (
     <main
       style={themeStyle}
       className="app-shell mx-auto flex min-h-screen max-w-[1540px] flex-col gap-4 px-3 py-3 sm:gap-5 sm:px-6 sm:py-5 lg:px-8 lg:py-6"
     >
-      <header className="app-header flex items-center justify-between gap-4 border-b border-[var(--line)] pb-3">
+      <header className="app-header relative z-40 flex flex-col items-stretch justify-between gap-3 border-b border-[var(--line)] pb-3 sm:flex-row sm:items-center sm:gap-4">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <div className="grid h-9 w-9 shrink-0 place-items-center bg-[var(--team-accent)] text-[11px] font-black tracking-[-0.04em] text-[var(--theme-on-accent)] sm:h-10 sm:w-10">
             P1
@@ -5418,7 +5440,28 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
                 : "Snapshot mode"}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap justify-end gap-2">
+          <DashboardCommandMenu commands={[
+            ...briefLibrary.filter((entry) => !entry.unavailableReason).map((entry) => ({
+              id: `brief:${entry.key}`, label: entry.label, detail: `Saved checkpoint · ${formatBriefDate(entry.record.brief.snapshotGeneratedAt)} · ${entry.record.brief.selectionMethod === "nim" ? "NVIDIA ordered" : "Snapshot order"}`,
+              category: "Brief" as const, keywords: "saved checkpoint library return",
+              current: activeTab === "analysis" && entry.key === briefCheckpointKey(briefMode, selectedDriver?.id ?? null, data.season),
+              run: () => openBriefCheckpoint(entry) })),
+            ...DASHBOARD_TABS.map((tab) => ({ id: `view:${tab.id}`, label: tab.label, detail: tab.description,
+              category: "Workspace" as const, current: activeTab === tab.id, keywords: "navigate open view",
+              run: () => setActiveTab(tab.id) })),
+            ...data.standings.map((driver) => ({ id: `driver:${driver.id}`, label: driver.fullName,
+              detail: `${driver.abbreviation} · ${driver.teamName} · Championship P${driver.standingPosition}`,
+              category: "Driver" as const, current: driver.id === effectiveSelectedDriverId,
+              run: () => { selectDriver(driver.id); setBriefMode("driver-focus"); setActiveTab("analysis"); } })),
+            ...visualThemeOptions.map((theme) => ({ id: `theme:${theme.id}`, label: `${theme.label} theme`, detail: theme.detail,
+              category: "Theme" as const, current: theme.id === activeVisualTheme.id, keywords: "color colours livery",
+              run: () => changeVisualTheme(theme.id) })),
+            { id: "refresh", label: "Refresh dashboard", detail: isFetching ? "A refresh is already running" : "Request a new snapshot; keep current data while loading",
+              category: "Action", keywords: "reload update data", disabled: isFetching, run: () => { void refetch(); } },
+            { id: "appearance", label: "Cycle light / dark mode", detail: `Current appearance: ${ui.themeMode}`,
+              category: "Action", keywords: "system appearance", run: () => dispatch(cycleThemeMode()) },
+          ]} />
           <ThemePicker
             options={visualThemeOptions}
             value={activeVisualTheme?.id ?? "f1"}
@@ -5437,6 +5480,8 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
             type="button"
             onClick={() => void refetch()}
             aria-label="Refresh dashboard data"
+            disabled={isFetching}
+            aria-busy={isFetching}
             className={`utility-button inline-flex h-9 items-center gap-2 border border-[var(--line)] px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)] ${FOCUS_RING}`}
           >
             <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
@@ -5446,7 +5491,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       </header>
 
       {hasMounted && (!isOnline || error) ? (
-        <div className="glass-panel rounded-[20px] px-4 py-3 text-sm text-[var(--foreground)]">
+        <div role="status" className="glass-panel rounded-[20px] px-4 py-3 text-sm text-[var(--foreground)]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="eyebrow">Status</span>
             {!isOnline ? (
@@ -5463,12 +5508,17 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           <div className="mt-2 text-[13px] text-[var(--muted)] sm:text-sm">
             {!isOnline
               ? "You are offline. The dashboard keeps the latest successful snapshot and local preferences visible until connectivity returns."
-              : "The latest refresh failed, so the page is holding the last good server snapshot instead of blinking or clearing the UI."}
+              : error && "status" in error && error.status === "TIMEOUT_ERROR"
+                ? "Refresh took longer than 45 seconds. Your last successful snapshot is still visible. Try Refresh again when the feeds recover."
+                : "The latest refresh failed. Your last successful snapshot is still visible; try Refresh again when the feeds recover."}
           </div>
         </div>
       ) : null}
 
       <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      <CockpitStatus dashboard={data} driver={selectedDriver}
+        onBrief={(mode) => { setBriefMode(mode); setActiveTab("analysis"); }} />
 
       {activeTab === "live" ? (
         <div className="grid gap-4 sm:gap-5">
@@ -5530,7 +5580,10 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       {activeTab === "analysis" ? (
         <div className="grid gap-4 sm:gap-5">
           <WidgetBoundary label="Pit Wall AI">
-            <PitWallAiPanel dashboard={data} selectedDriver={selectedDriver} onSelectDriver={selectDriver} />
+            <PitWallAiPanel dashboard={data} selectedDriver={selectedDriver} onSelectDriver={selectDriver}
+              mode={briefMode} onModeChange={setBriefMode} records={briefCheckpoints}
+              libraryEntries={briefLibrary} onOpenCheckpoint={openBriefCheckpoint}
+              onSaveRecord={(key, record) => setBriefCheckpoints((previous) => updateBriefCheckpoint(previous, key, record))} />
           </WidgetBoundary>
           <WidgetBoundary label="Strategy replay">
             <StrategyPanel
@@ -5632,7 +5685,7 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
           </span>
         ) : null}
         <span className="glass-pill rounded-full px-3 py-1.5">
-          Stable live demo
+          Source-aware race intelligence
         </span>
         <span className="glass-pill rounded-full px-3 py-1.5">
           Local prefs saved on this device

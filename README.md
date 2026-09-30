@@ -17,6 +17,13 @@ Live demo: https://polehq.vercel.app
 - NIM selects references only; headlines, cards, and the next-session item are assembled from dashboard records. Archived timing and strategy keep their circuit, date, and session context in the brief and export.
 - Pit Wall opens with an immediate three-card snapshot brief (fixed rules, explicitly not AI). NVIDIA refinement is optional and cancellable; a failed request leaves the readable brief in place. Searchable source receipts and exports use the exact displayed snapshot. Driver focus excludes other drivers' timing records.
 - Driver Focus has an inline driver picker and includes the selected driver's timing beyond the top six. Brief dates can be read in UTC or browser-local time; original timestamps stay intact in receipts and exports. Evidence search supports category filters.
+- Independent race-session feeds load concurrently. Client dashboard refreshes time out after 45 seconds while retaining the last successful snapshot; the Refresh control prevents duplicate requests and reports timeout failures explicitly. The local live-timing endpoint is a persistent replay stream, so its total request duration is not a page-load latency measurement.
+- Timing connections stay offline until a valid frame arrives. A WebSocket silent for 15 seconds falls back to replay; replay silent for 30 seconds is labeled offline until frames resume. Malformed messages and late frames from retired sockets are ignored. Transport activity does not relabel archived telemetry as live, and local replay emits neither fabricated latency nor race-control updates.
+- Open Commands from the header or press Ctrl/Cmd+K to search workspaces, drivers, team themes, and refresh/appearance actions. Search runs locally. Use arrow keys and Enter to select, Escape to close; focused controls are protected from dashboard playback shortcuts.
+- A shared cockpit strip keeps scheduled-event, selected-driver, and timing-connection context visible across workspaces. Event and driver shortcuts open Weekend Outlook and Driver Focus directly; driver commands also open Driver Focus. Source Health expands into per-feed provenance, status, notes, and timestamps without treating replay connectivity as fresh data. Past or cancelled schedule references are never labeled upcoming by this strip.
+- Keep Brief creates an in-memory checkpoint that survives workspace navigation, but not page reload. NVIDIA results use the same checkpoint store. Race/driver briefs are isolated by driver and season; weekend outlook is shared across driver selection. Compare exact saved/current evidence records without inference: positional reference changes are ignored, ambiguous duplicate labels are not paired, and missing records are not presented as events on track. Copy/export always use the displayed checkpoint until Use Current Snapshot releases it.
+- Saved Briefs is a searchable checkpoint library with snapshot dates, source-order attribution, and per-entry exports. Open restores the saved driver and briefing mode; Ctrl/Cmd+K also finds available checkpoints with “saved” or a driver name. Entries for missing drivers or other seasons remain exportable but cannot silently open under another driver. The library is in-memory only and clears on page reload.
+- Export All Briefs downloads every saved checkpoint into one offline text pack, regardless of library search filters. Each section retains its own scope, timestamps, AI attribution, and cited source receipts; unavailable-driver checkpoints are included. Packs are reading artifacts, not importable backups. Individual export filenames include driver and snapshot time.
 - Scrub-linked telemetry, 0.5x-16x session replay, and circuit-map synchronization
 - Official OpenF1 team-radio clips with session-scoped driver attribution
 - Opt-in local session reminders plus Google and Apple calendar links
@@ -94,7 +101,7 @@ The repo is intended to use GitHub as the source of truth.
 
 - `main` is the production branch
 - Pull requests should be used for preview verification
-- CI runs lint + build on push and PR via `.github/workflows/ci.yml`
+- CI runs regression tests, lint, and build on pushes to main and pull requests via `.github/workflows/ci.yml`
 
 ## Vercel deployment
 
