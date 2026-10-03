@@ -1,0 +1,23 @@
+.dialog { width: min(900px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: auto; color: var(--foreground); background: var(--background); border: 1px solid var(--line); border-top: 3px solid var(--team-accent); border-radius: 14px; box-shadow: 0 24px 100px #0008; }
+.dialog::backdrop { background: #080b14b8; backdrop-filter: blur(7px); }
+.header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 22px 24px 12px; }
+.header > div { min-width: 0; }
+.header span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+.header h2 { font-size: clamp(22px, 3vw, 30px); font-weight: 650; line-height: 1.25; letter-spacing: -.03em; margin-top: 6px; overflow-wrap: anywhere; }
+.dialog button, .dialog a { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; font-weight: 600; background: var(--surface); cursor: pointer; color: var(--foreground); }
+.dialog a[hidden] { display: none; }
+.header > button { flex-shrink: 0; }
+.dialog button:disabled { opacity: .5; cursor: wait; }
+.dialog button:hover, .dialog a:hover { background: var(--surface-strong); }
+.dialog button:focus-visible, .dialog a:focus-visible, .text:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+.description { margin: 0 24px 16px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 24px; }
+.status { margin: 12px 24px; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.text { display: block; width: calc(100% - 48px); height: clamp(140px, 42dvh, 480px); margin: 16px 24px; padding: 16px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--foreground); font-family: var(--font-mono), monospace; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 12px 24px; background: var(--surface); border-top: 1px solid var(--line); font-size: 10px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .header { padding: 18px 16px 12px; }
+  .description, .actions, .status { margin-left: 16px; margin-right: 16px; }
+  .text { width: calc(100% - 32px); margin: 14px 16px; padding: 12px; font-size: 16px; }
+  .footer { padding: 12px 16px; }
+}

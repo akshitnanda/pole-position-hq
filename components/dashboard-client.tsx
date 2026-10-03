@@ -72,6 +72,7 @@ import { F1TelemetrySuite } from "@/components/f1-telemetry-suite";
 import { PitWallAiPanel } from "@/components/pit-wall-ai";
 import { DashboardCommandMenu } from "@/components/dashboard-command-menu";
 import { CockpitStatus } from "@/components/cockpit-status";
+import { DriverShowcase } from "@/components/driver-showcase";
 import type { PitWallMode } from "@/lib/pit-wall-ai";
 import { formatBriefDate } from "@/lib/pit-wall-presentation";
 import { briefCheckpointKey, listBriefCheckpoints, updateBriefCheckpoint, type BriefCheckpoints, type BriefLibraryEntry } from "@/lib/brief-checkpoints";
@@ -3437,7 +3438,7 @@ function DashboardTabs({
               className={`group flex min-w-0 items-center justify-center gap-1.5 px-2 py-2.5 text-left transition sm:gap-2 sm:px-3 ${FOCUS_RING} ${
                 active
                   ? "bg-[var(--team-accent)] text-[var(--theme-on-accent)]"
-                  : "text-[var(--muted)] hover:bg-[var(--line)] hover:text-[var(--foreground)]"
+                  : "text-[var(--foreground)] hover:bg-[var(--line)]"
               }`}
             >
               <span className={`telemetry-text hidden text-[9px] sm:inline ${active ? "opacity-60" : "opacity-45"}`}>{index + 1}</span>
@@ -5516,6 +5517,11 @@ export function DashboardClient({ initialData }: { initialData: DashboardData })
       ) : null}
 
       <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      {activeTab === "live" || activeTab === "season" ? <WidgetBoundary label="Driver showcase">
+        <DriverShowcase dashboard={data} driver={selectedDriver} onSelect={selectDriver}
+          onBrief={() => { setBriefMode("driver-focus"); setActiveTab("analysis"); }} />
+      </WidgetBoundary> : null}
 
       <CockpitStatus dashboard={data} driver={selectedDriver}
         onBrief={(mode) => { setBriefMode(mode); setActiveTab("analysis"); }} />

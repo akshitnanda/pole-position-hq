@@ -12,6 +12,8 @@ import styles from "./pit-wall-ai.module.css";
 import { briefCheckpointKey, type BriefCheckpoints, type BriefLibraryEntry } from "@/lib/brief-checkpoints";
 import { BriefChanges } from "./brief-changes";
 import { BriefLibrary } from "./brief-library";
+import { BriefExportDialog } from "./brief-export-dialog";
+import type { TextExportDocument } from "@/lib/text-export";
 
 const MODES: Array<{ id: PitWallMode; label: string }> = [
   { id: "race-brief", label: "Race brief" },
@@ -45,6 +47,7 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver, mode
   const [elapsed, setElapsed] = useState(0);
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [copyResult, setCopyResult] = useState({ key: "", status: "idle" });
+  const [exportDocument, setExportDocument] = useState<TextExportDocument | null>(null);
   const [query, setQuery] = useState("");
   const [{ zone: timeZone, local: localTime }, setTimeDisplay] = useState({ zone: "UTC", local: false });
   const [evidenceKind, setEvidenceKind] = useState("all");
@@ -127,17 +130,8 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver, mode
     catch { setCopyState("failed"); }
   }
 
-  function downloadText(text: string, filename: string) {
-    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.append(link); link.click(); link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
-
-  function downloadBrief(exportRecord = record, exportMode = mode) {
-    if (exportRecord) downloadText(buildBriefText(exportMode, exportRecord), buildBriefFilename(exportMode, exportRecord));
+  function exportBrief(exportRecord = record, exportMode = mode) {
+    if (exportRecord) setExportDocument({ title: "Export briefing", text: buildBriefText(exportMode, exportRecord), filename: buildBriefFilename(exportMode, exportRecord) });
   }
 
   return <section className={styles.panel} aria-labelledby="pit-wall-title">
@@ -154,13 +148,14 @@ export function PitWallAiPanel({ dashboard, selectedDriver, onSelectDriver, mode
           {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}
           {copyState === "copied" ? "Copied" : "Copy"}
         </button>
-        <button onClick={() => downloadBrief()} disabled={!record}><Download size={15} /> Export</button>
+        <button onClick={() => exportBrief()} disabled={!record} aria-haspopup="dialog"><Download size={15} /> Export</button>
       </div>
     </header>
     <BriefLibrary entries={libraryEntries} activeKey={recordKey}
       onOpen={(entry) => { onOpenCheckpoint(entry); setQuery(""); setEvidenceKind("all"); setCopyState("idle"); }}
-      onExport={(entry) => downloadBrief(entry.record, entry.mode)}
-      onExportAll={() => downloadText(buildBriefLibraryText(libraryEntries), "pole-position-saved-briefing-pack.txt")} />
+      onExport={(entry) => exportBrief(entry.record, entry.mode)}
+      onExportAll={() => setExportDocument({ title: `Export ${libraryEntries.length} saved briefs`, text: buildBriefLibraryText(libraryEntries), filename: "pole-position-saved-briefing-pack.txt" })} />
+    {exportDocument && <BriefExportDialog artifact={exportDocument} onClose={() => setExportDocument(null)} />}
     <div className={styles.toolbar}>
       <div className={styles.modes} role="group" aria-label="Briefing mode">
         {MODES.map((option) => <button key={option.id} aria-pressed={option.id === mode}

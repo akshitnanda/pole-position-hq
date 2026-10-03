@@ -36,6 +36,82 @@ const { briefTextParts, formatBriefDate } = loadModule("lib/pit-wall-presentatio
 const { searchDashboardCommands } = loadModule("lib/dashboard-commands.ts");
 const { summarizeSourceHealth, scheduleContext } = loadModule("lib/cockpit-status.ts");
 const { briefCheckpointKey, updateBriefCheckpoint, compareBriefEvidence, listBriefCheckpoints } = loadModule("lib/brief-checkpoints.ts");
+const { createTextDownload } = loadModule("lib/text-export.ts");
+const { getDriverRaceSnapshot, dossierLap, dossierColor, dossierPortrait } = loadModule("lib/driver-dossier.ts");
+
+test("reveal portrait upgrades only the supplied trusted image rendition", () => {
+  assert.equal(dossierPortrait("https://media.formula1.com/drivers/name.png.transform/1col/image.png"), "https://media.formula1.com/drivers/name.png.transform/5col/image.png");
+  assert.equal(dossierPortrait("https://media.formula1.com/portrait.png"), "https://media.formula1.com/portrait.png");
+  for (const value of [null, "bad", "http://media.formula1.com/a.png", "https://elsewhere.test/a.png"]) assert.equal(dossierPortrait(value), null);
+});
+
+test("driver dossier only joins the requested driver and matching race session", () => {
+  const dashboard = {
+    timingTower: { session: { sessionKey: 10 }, status: "cached", updatedAt: "2026-10-01T00:00:00Z", note: "Archive", entries: [{ driverId: "ant", position: 5 }, { driverId: "rus", position: 1 }] },
+    strategy: { session: { sessionKey: 10 }, status: "cached", drivers: [{ driverId: "ant", stints: [{ compound: "SOFT" }] }] },
+  };
+  assert.equal(getDriverRaceSnapshot(dashboard, "ant").entry.position, 5);
+  assert.equal(getDriverRaceSnapshot(dashboard, "ant").strategy.stints[0].compound, "SOFT");
+  assert.equal(getDriverRaceSnapshot(dashboard, "missing").entry, null);
+  assert.equal(getDriverRaceSnapshot(dashboard, "rus").strategy, null);
+  const unrelated = { ...dashboard, strategy: { ...dashboard.strategy, session: { sessionKey: 11 } } };
+  assert.equal(getDriverRaceSnapshot(unrelated, "ant").strategy, null);
+  assert.equal(getDriverRaceSnapshot(unrelated, "ant").strategyStatus, null);
+  const noContext = { ...dashboard, timingTower: { ...dashboard.timingTower, session: null } };
+  assert.equal(getDriverRaceSnapshot(noContext, "ant").entry, null);
+  assert.equal(getDriverRaceSnapshot(noContext, "ant").strategy, null);
+});
+
+test("dossier lap formatting rounds across minute boundaries and preserves missing values", () => {
+  assert.equal(dossierLap(59.9998), "1:00.000");
+  assert.equal(dossierLap(105.413), "1:45.413");
+  for (const value of [null, undefined, 0, -3, NaN, Infinity]) assert.equal(dossierLap(value), "—");
+});
+
+test("3D livery accepts only six-digit team colors", () => {
+  assert.equal(dossierColor("00D2BE"), "#00D2BE");
+  assert.equal(dossierColor("#e10600"), "#e10600");
+  assert.equal(dossierColor("url(example)"), "#e10600");
+  assert.equal(dossierColor(""), "#e10600");
+});
+
+test("export download resource preserves exact Unicode text and remains valid until released", async () => {
+  const text = "Saved snapshot\nNico Hülkenberg · source <unchanged>\n2026-10-01T12:00:00Z";
+  let received;
+  const revoked = [];
+  const resource = createTextDownload(text, {
+    createObjectURL: (blob) => { received = blob; return "blob:test-export"; },
+    revokeObjectURL: (url) => revoked.push(url),
+  });
+  assert.equal(resource.href, "blob:test-export");
+  assert.equal(received.type, "text/plain;charset=utf-8");
+  assert.equal(await received.text(), text);
+  assert.deepEqual(revoked, []);
+  resource.release();
+  resource.release();
+  assert.deepEqual(revoked, ["blob:test-export"]);
+});
+
+test("concurrent export resources release independently without invalidating a newer preview", () => {
+  let next = 0;
+  const revoked = [];
+  const urlApi = { createObjectURL: () => `blob:export-${++next}`, revokeObjectURL: (url) => revoked.push(url) };
+  const first = createTextDownload("First", urlApi);
+  const second = createTextDownload("Second", urlApi);
+  first.release();
+  assert.deepEqual(revoked, [first.href]);
+  assert.notEqual(first.href, second.href);
+  second.release();
+  assert.deepEqual(revoked, [first.href, second.href]);
+});
+
+test("blocked download preparation throws without claiming success or revoking unrelated URLs", () => {
+  let revokes = 0;
+  assert.throws(() => createTextDownload("Still available to preview", {
+    createObjectURL: () => { throw new Error("Downloads blocked"); }, revokeObjectURL: () => revokes++,
+  }), /Downloads blocked/);
+  assert.equal(revokes, 0);
+});
 
 test("briefing pack preserves each checkpoint scope, frozen facts and receipts including unavailable drivers", () => {
   const makeRecord = (name, ref, date, fact) => {

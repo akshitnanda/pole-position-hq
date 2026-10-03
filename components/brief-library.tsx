@@ -23,7 +23,7 @@ export function BriefLibrary({ entries, activeKey, onOpen, onExport, onExportAll
       <p>Return to a checkpoint with its original driver, mode and evidence. Newest snapshots first. Reloading the page clears this library.</p>
       {entries.length > 0 ? <>
         <div className={styles.pack}>
-          <button type="button" onClick={onExportAll}><Download size={14} /> Export all briefs ({entries.length})</button>
+          <button type="button" onClick={onExportAll} aria-haspopup="dialog"><Download size={14} /> Export all briefs ({entries.length})</button>
           <span>One text pack, including briefs outside this search. Offline reading only.</span>
         </div>
         <label className={styles.search}><Search size={15} /><input aria-label="Search saved briefs" placeholder="Find a driver or briefing mode…" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -38,7 +38,7 @@ export function BriefLibrary({ entries, activeKey, onOpen, onExport, onExportAll
             <button type="button" onClick={() => onOpen(entry)} disabled={Boolean(entry.unavailableReason) || entry.key === activeKey} aria-label={`Open saved ${entry.label}`}>
               {entry.key === activeKey ? "Viewing" : "Open"}<ArrowUpRight size={14} />
             </button>
-            <button type="button" onClick={() => onExport(entry)} aria-label={`Export saved ${entry.label}`}><Download size={14} /><span>Export</span></button>
+            <button type="button" onClick={() => onExport(entry)} aria-label={`Export saved ${entry.label}`} aria-haspopup="dialog"><Download size={14} /><span>Export</span></button>
           </div>
         </li>)}</ul>
         {!results.length && <div className={styles.empty}>No matching saved briefs. <button type="button" onClick={() => setQuery("")}>Clear search</button></div>}
